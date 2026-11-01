@@ -2,6 +2,8 @@ pub mod achievements;
 pub mod archive;
 pub mod audio;
 pub mod audio_pipe;
+#[cfg(target_os = "linux")]
+pub mod crash;
 pub mod frontend;
 pub mod hw_gl;
 pub mod hw_vulkan;
