@@ -748,14 +748,23 @@ fn with_core_options<R>(f: impl FnOnce(&mut CoreOptionsState) -> R) -> R {
 
 fn store_core_option_defs(defs: Vec<CoreOptionDef>) {
     with_core_options(|st| {
-        st.values = defs
+        let values = defs
             .iter()
             .filter_map(|d| {
-                CString::new(d.default_value.as_str())
-                    .ok()
+                st.values
+                    .get(&d.key)
+                    .filter(|value| {
+                        d.values
+                            .iter()
+                            .any(|v| v.value.as_bytes() == value.as_bytes())
+                    })
+                    .cloned()
+                    .or_else(|| CString::new(d.default_value.as_str()).ok())
                     .map(|c| (d.key.clone(), c))
             })
             .collect();
+        st.retired.extend(st.values.drain().map(|(_, value)| value));
+        st.values = values;
         st.defs = defs;
         st.dirty = true;
     });
@@ -778,7 +787,8 @@ pub fn core_option_defs() -> Vec<CoreOptionDef> {
 pub fn set_core_option_values(values: &[(String, String)]) {
     with_core_options(|st| {
         for (key, value) in values {
-            if st.defs.iter().any(|d| &d.key == key) {
+            // Some cores, including ParaLLEl PS2, register options only during retro_init.
+            if st.defs.is_empty() || st.defs.iter().any(|d| &d.key == key) {
                 if let Ok(c) = CString::new(value.as_str()) {
                     if let Some(old) = st.values.insert(key.clone(), c) {
                         st.retired.push(old);
@@ -1352,6 +1362,54 @@ unsafe extern "C" fn input_state_trampoline(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn launch_options_survive_late_and_repeated_registration() {
+        clear_core_options();
+        set_core_option_values(&[
+            ("pcsx2_shared_memory_cards".into(), "disabled".into()),
+            ("pcsx2_renderer".into(), "Vulkan".into()),
+            ("unknown".into(), "ignored".into()),
+        ]);
+        let cards = CString::new("pcsx2_shared_memory_cards").unwrap();
+        let card_values = CString::new("Shared cards; enabled|disabled").unwrap();
+        let renderer = CString::new("pcsx2_renderer").unwrap();
+        let renderer_values = CString::new("Renderer; OpenGL|Vulkan").unwrap();
+        let defs = [
+            sys::retro_variable {
+                key: cards.as_ptr(),
+                value: card_values.as_ptr(),
+            },
+            sys::retro_variable {
+                key: renderer.as_ptr(),
+                value: renderer_values.as_ptr(),
+            },
+            sys::retro_variable {
+                key: ptr::null(),
+                value: ptr::null(),
+            },
+        ];
+        let register = || unsafe {
+            assert!(env_trampoline(
+                sys::RETRO_ENVIRONMENT_SET_VARIABLES,
+                defs.as_ptr().cast_mut().cast()
+            ));
+        };
+        register();
+        assert!(
+            core_option_values().contains(&("pcsx2_shared_memory_cards".into(), "disabled".into()))
+        );
+        assert!(core_option_values().contains(&("pcsx2_renderer".into(), "Vulkan".into())));
+        assert_eq!(core_option_values().len(), 2);
+        register();
+        assert!(
+            core_option_values().contains(&("pcsx2_shared_memory_cards".into(), "disabled".into()))
+        );
+        set_core_option_values(&[("pcsx2_renderer".into(), "unsupported".into())]);
+        register();
+        assert!(core_option_values().contains(&("pcsx2_renderer".into(), "OpenGL".into())));
+        clear_core_options();
+    }
 
     #[test]
     fn controller_info_lists_every_port_until_the_terminator() {

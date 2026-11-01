@@ -157,7 +157,10 @@ impl Session {
             }
             let code = loop {
                 match wait_child.lock().unwrap().try_wait() {
-                    Ok(Some(status)) => break status.code(),
+                    Ok(Some(status)) => {
+                        tracing::info!(%status, "runner process exited");
+                        break status.code();
+                    }
                     Ok(None) => {}
                     Err(_) => break None,
                 }
