@@ -13,6 +13,7 @@ All notable changes to Romp are listed here. The format follows [Keep a Changelo
 
 ### Fixed
 
+- PS2 in-game saves persist after closing and reopening the game. RomP now reports successful file seeks correctly, so the emulator writes memory-card data and its checksum to disk.
 - PS2 games on Windows and Linux no longer crash on start when the BIOS folder holds Japan v1.80 or v2.10. RomP now starts them with the newest retail BIOS it finds, and skips those two, instead of whichever file the emulator listed first.
 - A mouse button let go over the game menu no longer stays held in the game. Held through Restart, it stopped Amiga games booting from their disk.
 - Amiga games made for the Amiga 1200, with "AGA" in their name, start on an Amiga 1200 instead of an Amiga 600, which can't run them. Others with the model in their name, such as "(A500)", get that model too, and the rest still start on an Amiga 600.
