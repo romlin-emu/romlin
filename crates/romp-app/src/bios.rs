@@ -137,6 +137,40 @@ fn has_ps2_bios(system_dir: &Path) -> bool {
     })
 }
 
+/// Dumps whose fast boot hands PCSX2's recompiler a misaligned jump, which crashes it.
+const PS2_BIOS_CRASHES: [&str; 2] = ["ps2-0180j-20031028", "ps2-0210j-20040917"];
+
+/// The PS2 BIOS games start with: the newest retail dump of the standard `ps2-0230e-20080220`
+/// names. Left to itself the core takes whichever file the folder lists first.
+pub fn ps2_bios_choice(system_dir: &Path) -> Option<String> {
+    std::fs::read_dir(system_dir.join(PCSX2_BIOS_DIR))
+        .ok()?
+        .flatten()
+        .filter(|e| {
+            e.metadata()
+                .is_ok_and(|m| m.is_file() && PS2_BIOS_SIZE.contains(&m.len()))
+        })
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            Some((ps2_bios_rank(&name)?, name))
+        })
+        .max()
+        .map(|(_, name)| name)
+}
+
+/// Orders dumps by version, then date; `None` for names that aren't retail or are known to crash.
+fn ps2_bios_rank(file: &str) -> Option<(u32, String)> {
+    let stem = Path::new(file).file_stem()?.to_str()?.to_ascii_lowercase();
+    if PS2_BIOS_CRASHES.contains(&stem.as_str()) {
+        return None;
+    }
+    let (model, date) = stem.strip_prefix("ps2-")?.split_once('-')?;
+    let (version, region) = model.split_at_checked(4)?;
+    // A development or test unit's region letter is followed by a "d".
+    (region.len() == 1).then_some(())?;
+    Some((version.parse().ok()?, date.to_string()))
+}
+
 pub fn xbox_dir(system_dir: &Path) -> PathBuf {
     system_dir.join(XEMU_DIR)
 }
@@ -362,6 +396,38 @@ mod tests {
         assert_eq!(missing("ps2", dir.path()).len(), 1);
         std::fs::write(bios.join("SCPH-70012.bin"), vec![0u8; 4 << 20]).unwrap();
         assert!(missing("ps2", dir.path()).is_empty());
+    }
+
+    #[test]
+    fn ps2_games_start_with_the_newest_retail_bios_that_does_not_crash() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(ps2_bios_choice(dir.path()), None);
+        let bios = dir.path().join(PCSX2_BIOS_DIR);
+        std::fs::create_dir_all(&bios).unwrap();
+        let add = |name: &str| {
+            std::fs::File::create(bios.join(name))
+                .unwrap()
+                .set_len(4 << 20)
+                .unwrap();
+        };
+        add("SCPH-70012.bin");
+        assert_eq!(ps2_bios_choice(dir.path()), None);
+        add("ps2-0180j-20031028.bin");
+        add("ps2-0210j-20040917.bin");
+        assert_eq!(ps2_bios_choice(dir.path()), None);
+        add("ps2-0190j-20030822.bin");
+        assert_eq!(
+            ps2_bios_choice(dir.path()).as_deref(),
+            Some("ps2-0190j-20030822.bin")
+        );
+        add("ps2-0230e-20080220.bin");
+        add("ps2-0250ed-20100415.bin");
+        add("ps2-0101xd-20000224.bin");
+        std::fs::write(bios.join("ps2-0300e-20300101.bin"), b"too small").unwrap();
+        assert_eq!(
+            ps2_bios_choice(dir.path()).as_deref(),
+            Some("ps2-0230e-20080220.bin")
+        );
     }
 
     #[test]
