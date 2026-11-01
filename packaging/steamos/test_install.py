@@ -31,7 +31,7 @@ def desktop_args(command):
 class InstallerTests(unittest.TestCase):
     def run_install(self, home, corrupt=False, add=True):
         name = 'RomP-nightly-x86_64.AppImage'
-        url = install.REPO + '/releases/download/nightly/'
+        url = 'https://github.com/aaronflorey/RomP/releases/download/nightly/'
         release = {'assets': [{'name': n, 'browser_download_url': url + n}
                               for n in (name, name + '.sha512')]}
         payload = b'appimage fixture'
@@ -58,7 +58,7 @@ class InstallerTests(unittest.TestCase):
             install.install()
             fetch.assert_called_once()
             self.assertEqual(fetch.call_args.args[0].full_url,
-                             'https://api.github.com/repos/RompEmu/RomP/releases/tags/nightly')
+                             'https://api.github.com/repos/aaronflorey/RomP/releases/tags/nightly')
             return calls
 
     def test_install_and_update_without_duplicate(self):
@@ -85,9 +85,13 @@ class InstallerTests(unittest.TestCase):
             self.assertEqual(image.read_bytes(), b'old app')
             self.assertEqual(list(image.parent.iterdir()), [image])
 
-    def test_unexpected_download_host_rejected(self):
-        with self.assertRaises(ValueError):
-            install.download('https://example.com/app', Path('/unused'))
+    def test_unexpected_download_source_rejected(self):
+        for url in [
+            'https://example.com/app',
+            'https://github.com/RompEmu/RomP/releases/download/nightly/RomP-nightly-x86_64.AppImage',
+        ]:
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                install.download(url, Path('/unused'))
 
     def test_desktop_quoting_and_bootstrap_syntax(self):
         value = '/home/a b/$`"\\/RomP.AppImage'

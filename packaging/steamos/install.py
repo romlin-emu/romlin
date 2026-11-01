@@ -12,11 +12,11 @@ import tempfile
 import urllib.request
 
 
-REPO = "https://github.com/RompEmu/RomP"
+REPO = "aaronflorey/RomP"
 
 
 def download(url, target):
-    if not url.startswith(REPO + "/releases/download/"):
+    if not url.startswith(f"https://github.com/{REPO}/releases/download/"):
         raise ValueError("Unexpected release download URL")
     with urllib.request.urlopen(url, timeout=60) as source, target.open("wb") as dest:
         shutil.copyfileobj(source, dest)
@@ -44,7 +44,7 @@ def install():
                     "An existing installation there will be updated. Close RomP before continuing. "
                     "No password is needed. The download may take a few minutes."], check=True)
     request = urllib.request.Request(
-        "https://api.github.com/repos/RompEmu/RomP/releases/tags/nightly",
+        f"https://api.github.com/repos/{REPO}/releases/tags/nightly",
         headers={"Accept": "application/vnd.github+json", "User-Agent": "RomP-installer"},
     )
     with urllib.request.urlopen(request, timeout=60) as response:

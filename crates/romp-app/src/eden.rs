@@ -237,11 +237,13 @@ fn unpack_firmware(bytes: &[u8], stage: &Path) -> Result<(), String> {
             .file_name()
             .and_then(|n| n.to_str())
             .ok_or("Invalid firmware filename")?;
-        let Some(id) = name.strip_suffix(".nca") else {
+        let filename = name.to_ascii_lowercase();
+        let Some(stem) = filename.strip_suffix(".nca") else {
             continue;
         };
+        let id = stem.strip_suffix(".cnmt").unwrap_or(stem);
         if id.len() != 32 || !id.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err("Invalid firmware NCA filename".into());
+            return Err(format!("Invalid firmware NCA filename: {name}"));
         }
         total = total
             .checked_add(entry.size())
@@ -252,7 +254,7 @@ fn unpack_firmware(bytes: &[u8], stage: &Path) -> Result<(), String> {
         let mut out = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
-            .open(stage.join(name))
+            .open(stage.join(filename))
             .map_err(|e| e.to_string())?;
         let size = entry.size();
         let copied = std::io::copy(&mut std::io::Read::take(entry, size + 1), &mut out)
@@ -414,10 +416,34 @@ mod tests {
             "readme.txt",
             "../0123456789abcdef0123456789abcdef.nca",
             "bad.nca",
+            "bad.cnmt.nca",
+            "0123456789abcdef0123456789abcdef.cnmt.cnmt.nca",
         ] {
             std::fs::write(&archive, firmware(bad, b"bad")).unwrap();
             assert!(install_firmware(&archive, &home).is_err());
             assert_eq!(std::fs::read(&installed).unwrap(), b"nca");
+        }
+    }
+
+    #[test]
+    fn imports_metadata_ncas_with_the_filenames_eden_accepts() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("user");
+        let archive = dir.path().join("Firmware.22.5.0.zip");
+        for name in [
+            "0123456789abcdef0123456789abcdef.cnmt.nca",
+            "0123456789ABCDEF0123456789ABCDEF.NCA",
+        ] {
+            std::fs::write(&archive, firmware(&format!("firmware/{name}"), b"metadata")).unwrap();
+            install_firmware(&archive, &home).unwrap();
+            assert_eq!(
+                std::fs::read(
+                    home.join("nand/system/Contents/registered")
+                        .join(name.to_ascii_lowercase())
+                )
+                .unwrap(),
+                b"metadata"
+            );
         }
     }
 }
