@@ -140,8 +140,9 @@ fn has_ps2_bios(system_dir: &Path) -> bool {
 /// Dumps whose fast boot hands PCSX2's recompiler a misaligned jump, which crashes it.
 const PS2_BIOS_CRASHES: [&str; 2] = ["ps2-0180j-20031028", "ps2-0210j-20040917"];
 
-/// The PS2 BIOS games start with: the newest retail dump of the standard `ps2-0230e-20080220`
-/// names. Left to itself the core takes whichever file the folder lists first.
+/// Prefer the newest standard retail dump. Some BIOS collections use `ps2-...` names,
+/// while others keep the console's `SCPH-...` model name; accept both formats.
+/// Left to itself the core takes whichever file the folder lists first.
 pub fn ps2_bios_choice(system_dir: &Path) -> Option<String> {
     std::fs::read_dir(system_dir.join(PCSX2_BIOS_DIR))
         .ok()?
@@ -158,17 +159,40 @@ pub fn ps2_bios_choice(system_dir: &Path) -> Option<String> {
         .map(|(_, name)| name)
 }
 
-/// Orders dumps by version, then date; `None` for names that aren't retail or are known to crash.
-fn ps2_bios_rank(file: &str) -> Option<(u32, String)> {
+/// Modern versioned dumps > modern model names > original SCPH-10000.
+/// Libretro recommends avoiding SCPH-10000: https://docs.libretro.com/library/lrps2/#bios
+/// Recency is a fallback heuristic, not a compatibility guarantee.
+fn ps2_bios_rank(file: &str) -> Option<(u8, u32, String, String)> {
     let stem = Path::new(file).file_stem()?.to_str()?.to_ascii_lowercase();
     if PS2_BIOS_CRASHES.contains(&stem.as_str()) {
         return None;
     }
-    let (model, date) = stem.strip_prefix("ps2-")?.split_once('-')?;
-    let (version, region) = model.split_at_checked(4)?;
-    // A development or test unit's region letter is followed by a "d".
-    (region.len() == 1).then_some(())?;
-    Some((version.parse().ok()?, date.to_string()))
+    if let Some(rest) = stem.strip_prefix("ps2-") {
+        let (model, date) = rest.split_once('-')?;
+        let (version, region) = model.split_at_checked(4)?;
+        // Development or test units have a trailing "d" in the region code.
+        if region.len() != 1 || !region.as_bytes()[0].is_ascii_alphabetic() {
+            return None;
+        }
+        if date.len() != 8 || !date.bytes().all(|b| b.is_ascii_digit()) {
+            return None;
+        }
+        let version = version.parse().ok()?;
+        let tier = if version == 100 { 0 } else { 2 };
+        return Some((tier, version, date.to_string(), stem));
+    }
+
+    // Retail BIOS images are commonly named after the console model (SCPH-#####,
+    // with an optional regional/model suffix). Rank by model number as a stable
+    // proxy for release recency; these names do not encode a BIOS version/date.
+    let model = stem.strip_prefix("scph")?.trim_start_matches('-');
+    let digits: String = model.chars().take_while(char::is_ascii_digit).collect();
+    if digits.len() < 4 {
+        return None;
+    }
+    let model = digits.parse().ok()?;
+    let tier = if model == 10000 { 0 } else { 1 };
+    Some((tier, model, String::new(), stem))
 }
 
 pub fn xbox_dir(system_dir: &Path) -> PathBuf {
@@ -411,10 +435,16 @@ mod tests {
                 .unwrap();
         };
         add("SCPH-70012.bin");
-        assert_eq!(ps2_bios_choice(dir.path()), None);
+        assert_eq!(
+            ps2_bios_choice(dir.path()).as_deref(),
+            Some("SCPH-70012.bin")
+        );
         add("ps2-0180j-20031028.bin");
         add("ps2-0210j-20040917.bin");
-        assert_eq!(ps2_bios_choice(dir.path()), None);
+        assert_eq!(
+            ps2_bios_choice(dir.path()).as_deref(),
+            Some("SCPH-70012.bin")
+        );
         add("ps2-0190j-20030822.bin");
         assert_eq!(
             ps2_bios_choice(dir.path()).as_deref(),
@@ -428,6 +458,41 @@ mod tests {
             ps2_bios_choice(dir.path()).as_deref(),
             Some("ps2-0230e-20080220.bin")
         );
+    }
+
+    #[test]
+    fn ps2_bios_selection_accepts_scph_names_and_prefers_ps2_version_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let bios = dir.path().join(PCSX2_BIOS_DIR);
+        std::fs::create_dir_all(&bios).unwrap();
+        for name in ["SCPH-39001.bin", "SCPH-70012.bin", "SCPH-90001.bin"] {
+            std::fs::File::create(bios.join(name))
+                .unwrap()
+                .set_len(4 << 20)
+                .unwrap();
+        }
+        assert_eq!(
+            ps2_bios_choice(dir.path()).as_deref(),
+            Some("SCPH-90001.bin")
+        );
+
+        std::fs::File::create(bios.join("ps2-0230e-20080220.bin"))
+            .unwrap()
+            .set_len(4 << 20)
+            .unwrap();
+        assert_eq!(
+            ps2_bios_choice(dir.path()).as_deref(),
+            Some("ps2-0230e-20080220.bin")
+        );
+    }
+
+    #[test]
+    fn ps2_ranking_avoids_original_bios() {
+        let rank = |name| ps2_bios_rank(name).unwrap();
+        assert!(rank("SCPH-70012.bin") > rank("ps2-0100j-20000117.bin"));
+        assert!(rank("ps2-0190j-20030822.bin") > rank("SCPH-10000.bin"));
+        assert_eq!(rank("SCPH39001.BIN"), rank("scph39001.bin"));
+        assert!(ps2_bios_rank("ps2-0230e-invalid.bin").is_none());
     }
 
     #[test]
