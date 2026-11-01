@@ -120,8 +120,10 @@ The quickest setup needs no terminal or external keyboard:
 2. Download [Install RomP](https://raw.githubusercontent.com/aaronflorey/RomP/main/packaging/steamos/Install-RomP.desktop).
    Open the downloaded file in Dolphin and approve **Execute** (or **Trust and
    Launch**) if asked. If needed, enable **Is executable** in its Properties.
-3. Follow the installer prompts, then choose **Yes** to add RomP to Steam.
-   Steam may ask you to confirm adding the shortcut.
+3. Follow the installer prompts and exit Steam using **Steam → Exit** when
+   asked. The installer reuses an existing RomP shortcut. If none exists, choose
+   **Yes** to add it, confirm in Steam, then exit Steam again when prompted
+   so the installer can apply the library artwork.
 4. Return to Gaming Mode and open **Library → Non-Steam → RomP**. Connect to
    your RomM server; **Steam + X** opens the on-screen keyboard.
 
@@ -133,8 +135,12 @@ RomP application-menu entry. It needs internet access, Python 3, `kdialog`, and
 SteamOS's `steamos-add-to-steam` helper, supplied by SteamOS. No sudo or changes
 to the system partition are needed. It runs the AppImage with
 `--appimage-extract-and-run`, so FUSE is not required. Run the installer again to
-update; close RomP first and choose **No** when asked to add it to Steam again.
-Steam does not update this installation automatically.
+update; close RomP first. It detects the saved shortcut and refreshes its artwork
+without adding another entry.
+Steam does not update this installation automatically. The installer also adds portrait
+and landscape capsules, a hero banner, a transparent logo and the RomP icon to
+the saved shortcut in each matching Steam profile. This replaces existing artwork
+for that shortcut. Artwork is downloaded from this repository; restart Steam to see it.
 
 For a manual install, download the x86_64 AppImage from the
 [nightly build](https://github.com/aaronflorey/RomP/releases/tag/nightly), keep it in a
