@@ -260,5 +260,23 @@ Old saves in the shared portable `user/nand` folder are preserved, not automatic
 assigned to games. To import one, close Eden and copy only that title's save directory
 into the game's `eden-nand/user/save/...` directory, preserving its account/title path.
 The old user profiles are copied automatically when the game's NAND is first created.
-Configure controllers and other emulator-specific options in Eden; RomP passes its
-fullscreen preference. macOS installation is not supported yet.
+RomP configures all connected gamepads in connection order, up to eight players,
+including their sticks, triggers and D-pads. One controller uses Handheld mode;
+two or more use separate Pro Controllers. Connect your controllers before launching
+the game. RomP refreshes its own mappings on each launch, including replacements,
+and disconnects its unused player slots. A player you customize in Eden is left
+alone, including its controller type, bindings and input profile. Configure
+game-specific input profiles and other emulator options in Eden; RomP passes its
+fullscreen preference.
+macOS installation is not supported yet.
+
+If Pokémon: Let's Go, Pikachu! or Eevee! gets stuck at controller selection, stop
+the game and open Eden's **Emulation → Configure → Controls**. Connect Player 1,
+choose **Handheld** as the emulated controller, and select your actual controller
+as the input device to populate its bindings. On Steam Deck with Steam Input,
+this is usually **Steam Virtual Gamepad**. Apply the settings and relaunch the game.
+
+For Let's Go co-op, configure each player's emulated controller as a single Joy-Con
+in Eden instead of a Pro Controller, and set up the game's required motion inputs.
+You can save these as game-specific input profiles so other games keep their
+usual controls.

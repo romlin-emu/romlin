@@ -18,6 +18,12 @@ pub struct PadInfo {
     pub family: Family,
 }
 
+/// Raw SDL identity and bindings for configuring an external emulator.
+pub struct SdlController {
+    pub guid: [u8; 16],
+    pub mapping: Option<String>,
+}
+
 pub fn pad_keys(uuids: &[[u8; 16]], names: &[&str]) -> Vec<String> {
     let mut seen: HashMap<String, usize> = HashMap::new();
     uuids
@@ -324,6 +330,19 @@ impl Gamepads {
                 key,
                 name: pad.name.clone(),
                 family: pad.family,
+            })
+            .collect()
+    }
+
+    pub fn sdl_controllers(&self) -> Vec<SdlController> {
+        let Some(sdl) = &self.sdl else {
+            return Vec::new();
+        };
+        sdl.pads
+            .iter()
+            .map(|pad| SdlController {
+                guid: sdl.subsystem.guid_for_id(pad.id).raw().data,
+                mapping: pad.gamepad.mapping(),
             })
             .collect()
     }
