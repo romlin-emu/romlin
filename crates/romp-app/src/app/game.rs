@@ -1159,10 +1159,15 @@ impl Controller {
                 .is_some_and(|core| crate::cores::uses_vulkan(core.id)),
             options: core_for_platform(&detail.platform_slug)
                 .map(|core| {
-                    crate::cores::with_platform_options(
+                    let mut options = crate::cores::with_platform_options(
                         &detail.platform_slug,
                         crate::console_settings::core_options(core.id, &self.console_choices()),
-                    )
+                    );
+                    if core.id == "pcsx2" {
+                        let bios = bios::ps2_bios_choice(&paths::system_dir());
+                        options.extend(bios.map(|bios| ("pcsx2_bios".to_string(), bios)));
+                    }
+                    options
                 })
                 .unwrap_or_default(),
             split_screens: core_for_platform(&detail.platform_slug)
