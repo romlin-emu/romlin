@@ -72,6 +72,22 @@ pub struct CoreGame {
     _timer: Timer,
 }
 
+#[derive(Default)]
+struct GameClose {
+    requested: Cell<bool>,
+    exited: Cell<bool>,
+}
+
+impl GameClose {
+    fn request(&self) -> bool {
+        !self.requested.replace(true)
+    }
+
+    fn ready(&self) -> bool {
+        self.requested.get() && self.exited.get()
+    }
+}
+
 pub enum RunningGame {
     Core(CoreGame),
     External(crate::external::Running),
@@ -1367,17 +1383,17 @@ pub fn launch(
         window.set_volume(i32::from(opts.prefs.volume));
     }
 
-    let finished = Rc::new(Cell::new(false));
+    let closing = Rc::new(GameClose::default());
+    let on_closed = Rc::new(RefCell::new(Some(on_closed)));
     let started: Rc<RefCell<Option<CoreIdentity>>> = Rc::default();
     let game = Rc::new_cyclic(|weak: &Weak<Game>| {
         let finish: Rc<dyn Fn()> = Rc::new({
             let weak = weak.clone();
             let started = started.clone();
+            let closing = closing.clone();
+            let on_closed = on_closed.clone();
             move || {
-                if finished.replace(true) {
-                    return;
-                }
-                if let Some(game) = weak.upgrade() {
+                if let Some(game) = weak.upgrade().filter(|_| closing.request()) {
                     game.write_auto_thumbnail();
                     game.save_placements();
                     game.capture_mouse(false);
@@ -1386,7 +1402,12 @@ pub fn launch(
                         let _ = window.hide();
                     }
                 }
-                on_closed(started.borrow().clone());
+                // The core can still write its memory card during unload.
+                if closing.ready() {
+                    if let Some(on_closed) = on_closed.borrow_mut().take() {
+                        on_closed(started.borrow().clone());
+                    }
+                }
             }
         });
         Game {
@@ -1573,6 +1594,13 @@ pub fn launch(
             game.screenshot_saved();
             game.show_achievements(std::time::Instant::now());
             for event in events {
+                if matches!(&event, SessionEvent::Ended { .. }) {
+                    closing.exited.set(true);
+                    if closing.requested.get() {
+                        (game.finish)();
+                        return;
+                    }
+                }
                 if let SessionEvent::Runner(RunnerMsg::AchievementsRequest {
                     id,
                     url,
@@ -2026,6 +2054,25 @@ pub fn split_frame(rgba: &[u8], width: u32, height: u32) -> Option<(&[u8], &[u8]
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn closing_waits_for_the_core_to_finish_writing_saves() {
+        let close = GameClose::default();
+        assert!(close.request());
+        assert!(!close.ready(), "save sync must wait for process exit");
+        assert!(!close.request(), "shutdown is sent only once");
+        close.exited.set(true);
+        assert!(close.ready());
+    }
+
+    #[test]
+    fn an_exited_core_can_still_wait_for_the_error_window_to_close() {
+        let close = GameClose::default();
+        close.exited.set(true);
+        assert!(!close.ready());
+        assert!(close.request());
+        assert!(close.ready());
+    }
 
     #[test]
     fn command_or_control_w_closes_the_game() {
