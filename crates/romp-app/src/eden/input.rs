@@ -24,13 +24,26 @@ pub fn prepare(exe: &Path, controllers: &[SdlController]) -> io::Result<()> {
         Err(e) if e.kind() == io::ErrorKind::NotFound => Settings::new(),
         Err(e) => return Err(e),
     };
-    if let Some((text, managed)) = config_text(&existing, controllers, &previous) {
-        crate::saves::replace_file(&config, text.as_bytes())?;
-        crate::saves::replace_file(
-            &state,
-            &serde_json::to_vec(&managed).map_err(io::Error::other)?,
-        )?;
-    }
+    let Some((text, managed)) = config_text(&existing, controllers, &previous) else {
+        let guids: Vec<String> = controllers.iter().map(|c| guid_hex(c.guid)).collect();
+        tracing::info!(?guids, "Eden controls left unchanged");
+        return Ok(());
+    };
+    let players: Vec<String> = managed
+        .iter()
+        .filter(|(key, value)| key.ends_with("_connected") && *value == "true")
+        .map(|(key, _)| {
+            let player = key.trim_end_matches("_connected");
+            let a = managed.get(&format!("{player}_button_a"));
+            format!("{player}: {}", a.map_or("", String::as_str))
+        })
+        .collect();
+    tracing::info!(?players, "Eden controls configured");
+    crate::saves::replace_file(&config, text.as_bytes())?;
+    crate::saves::replace_file(
+        &state,
+        &serde_json::to_vec(&managed).map_err(io::Error::other)?,
+    )?;
     Ok(())
 }
 
@@ -169,6 +182,10 @@ fn can_configure(controls: &BTreeMap<&str, &str>, previous: &Settings, player: u
                 }))
 }
 
+fn guid_hex(guid: [u8; 16]) -> String {
+    guid.iter().map(|b| format!("{b:02x}")).collect()
+}
+
 fn player_settings(mapping: &str, device: &str, controller_type: &str) -> Settings {
     let bindings: BTreeMap<_, _> = mapping
         .split(',')
@@ -220,8 +237,7 @@ fn config_text(
         let mut guid = controller.guid;
         guid[2..4].fill(0);
         let port = ports.entry(guid).or_default();
-        let guid: String = guid.iter().map(|b| format!("{b:02x}")).collect();
-        let device = format!("engine:sdl,guid:{guid},port:{port}");
+        let device = format!("engine:sdl,guid:{},port:{port}", guid_hex(guid));
         *port += 1;
         let owned = if player == 0 {
             first_owned
