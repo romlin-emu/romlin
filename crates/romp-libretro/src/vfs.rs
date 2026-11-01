@@ -159,7 +159,8 @@ unsafe extern "C" fn seek(handle: *mut FileHandle, offset: i64, whence: c_int) -
     };
     unsafe { file(handle) }
         .and_then(|f| f.seek(to).ok())
-        .map_or(-1, |p| p as i64)
+        // libretro's seek returns status; tell returns the resulting position.
+        .map_or(-1, |_| 0)
 }
 
 unsafe extern "C" fn read(handle: *mut FileHandle, buffer: *mut u8, len: u64) -> i64 {
@@ -317,12 +318,14 @@ mod tests {
 
             let f = open(name.as_ptr(), ACCESS_READ, 0);
             assert_eq!(size(f), 11);
-            assert_eq!(seek(f, 6, SEEK_START), 6);
+            assert_eq!(seek(f, 6, SEEK_START), 0);
+            assert_eq!(tell(f), 6);
             let mut buffer = [0u8; 16];
             assert_eq!(read(f, buffer.as_mut_ptr(), 16), 5);
             assert_eq!(&buffer[..5], b"world");
             assert_eq!(tell(f), 11);
-            assert_eq!(seek(f, -5, SEEK_END), 6);
+            assert_eq!(seek(f, -5, SEEK_END), 0);
+            assert_eq!(tell(f), 6);
             assert_eq!(CStr::from_ptr(get_path(f)), name.as_c_str());
             close(f);
 
@@ -339,6 +342,67 @@ mod tests {
             std::fs::read(dir.path().join("save.srm")).unwrap(),
             b"Jello"
         );
+    }
+
+    #[test]
+    fn memory_card_updates_survive_reopening() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("game.ps2");
+        let name = c(&path);
+        let mut expected = vec![0; 16_896];
+        std::fs::write(&path, &expected).unwrap();
+        let updates: &[(i64, &[u8])] = &[
+            (8448, &[0xff; 8448]), // Erase a block away from the start.
+            (8960, b"saved progress"),
+            (528, b"checksum"),
+        ];
+        unsafe {
+            let f = (INTERFACE.open)(
+                name.as_ptr(),
+                ACCESS_READ | ACCESS_WRITE | ACCESS_UPDATE_EXISTING,
+                0,
+            );
+            assert!(!f.is_null());
+            for &(offset, bytes) in updates {
+                // PCSX2 writes only when the VFS reports a successful seek.
+                if (INTERFACE.seek)(f, offset, SEEK_START) == 0 {
+                    assert_eq!(
+                        (INTERFACE.write)(f, bytes.as_ptr(), bytes.len() as u64),
+                        bytes.len() as i64
+                    );
+                }
+                expected[offset as usize..offset as usize + bytes.len()].copy_from_slice(bytes);
+            }
+            assert_eq!((INTERFACE.close)(f), 0);
+        }
+        assert!(
+            std::fs::read(path).unwrap() == expected,
+            "the memory-card writes must survive closing and reopening the file"
+        );
+    }
+
+    #[test]
+    fn seek_reports_status_and_tell_reports_position() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("file");
+        std::fs::write(&path, b"0123456789").unwrap();
+        let name = c(&path);
+        unsafe {
+            let f = (INTERFACE.open)(name.as_ptr(), ACCESS_READ, 0);
+            assert!(!f.is_null());
+            for (offset, whence, position) in
+                [(5, SEEK_START, 5), (-2, SEEK_CURRENT, 3), (-1, SEEK_END, 9)]
+            {
+                assert_eq!((INTERFACE.seek)(f, offset, whence), 0);
+                assert_eq!((INTERFACE.tell)(f), position);
+            }
+            for (offset, whence) in [(-1, SEEK_START), (-20, SEEK_CURRENT), (0, 99)] {
+                assert_eq!((INTERFACE.seek)(f, offset, whence), -1);
+                assert_eq!((INTERFACE.tell)(f), 9);
+            }
+            assert_eq!((INTERFACE.seek)(std::ptr::null_mut(), 0, SEEK_START), -1);
+            assert_eq!((INTERFACE.close)(f), 0);
+        }
     }
 
     #[test]
