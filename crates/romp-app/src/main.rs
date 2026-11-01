@@ -84,6 +84,14 @@ struct Args {
 }
 
 fn main() -> anyhow::Result<()> {
+    let result = run();
+    if let Err(error) = &result {
+        tracing::error!(error = %format_args!("{error:#}"), "RomP failed");
+    }
+    result
+}
+
+fn run() -> anyhow::Result<()> {
     // The old data folder only moves into a data folder that isn't there yet, so the log
     // folder inside it comes after.
     let adopted = paths::adopt_legacy_data(&paths::data_dir());
