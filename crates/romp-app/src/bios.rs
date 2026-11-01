@@ -315,8 +315,23 @@ async fn place(
     system_dir: &Path,
     cancel: &AtomicBool,
 ) -> Result<Vec<String>, DownloadError> {
+    // RomM IDs increase with uploads; use the newest upload when names carry no version.
+    let newest_switch_archive = (platform_slug == crate::eden::PLATFORM)
+        .then(|| {
+            list.iter()
+                .filter(|fw| crate::eden::is_firmware_archive(&fw.file_name))
+                .max_by_key(|fw| (crate::eden::firmware_version(&fw.file_name), fw.id))
+                .map(|fw| fw.id)
+        })
+        .flatten();
     let mut unavailable = Vec::new();
     for fw in list {
+        if platform_slug == crate::eden::PLATFORM
+            && crate::eden::is_firmware_archive(&fw.file_name)
+            && Some(fw.id) != newest_switch_archive
+        {
+            continue;
+        }
         if cancel.load(Ordering::SeqCst) {
             return Err(DownloadError::Cancelled);
         }
@@ -359,6 +374,42 @@ mod tests {
     use crate::romm::client::tests::base_of;
     use wiremock::matchers::{method, path, query_param, query_param_is_missing};
     use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[tokio::test]
+    async fn switch_downloads_only_the_newest_archive_and_keeps_keys() {
+        let server = MockServer::start().await;
+        let list = serde_json::json!([
+            {"id": 1, "file_name": "Firmware v19.0.10.zip"},
+            {"id": 2, "file_name": "Firmware v19.0.2.zip"},
+            {"id": 3, "file_name": "firmware.zip"},
+            {"id": 4, "file_name": "prod.keys"}
+        ]);
+        Mock::given(method("GET"))
+            .and(path("/api/firmware"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(list))
+            .mount(&server)
+            .await;
+        for (id, name) in [(1, "Firmware v19.0.10.zip"), (4, "prod.keys")] {
+            Mock::given(method("GET"))
+                .and(path(format!("/api/firmware/{id}/content/{name}")))
+                .respond_with(ResponseTemplate::new(200).set_body_string("content"))
+                .expect(1)
+                .mount(&server)
+                .await;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let client = Client::new(base_of(&server, "/"));
+        assert!(
+            ensure(&client, 22, "switch", dir.path(), &AtomicBool::new(false))
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(dir.path().join("eden/Firmware v19.0.10.zip").is_file());
+        assert!(dir.path().join("eden/prod.keys").is_file());
+        assert!(!dir.path().join("eden/Firmware v19.0.2.zip").exists());
+        assert!(!dir.path().join("eden/firmware.zip").exists());
+    }
 
     #[test]
     fn switch_firmware_and_keys_go_to_edens_import_directory() {
