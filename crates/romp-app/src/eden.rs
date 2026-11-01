@@ -1,3 +1,4 @@
+pub mod input;
 pub mod saves;
 
 use crate::external::{Asset, Emulator, Running};

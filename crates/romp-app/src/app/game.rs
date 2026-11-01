@@ -873,6 +873,16 @@ impl Controller {
             Ok(exe) => exe,
             Err(e) => return self.game_status(detail.id, e),
         };
+        let mut gamepads = self.gamepads.borrow_mut();
+        gamepads.poll();
+        let controllers = gamepads.sdl_controllers();
+        drop(gamepads);
+        if let Err(e) = eden::input::prepare(&exe, &controllers) {
+            return self.game_status(
+                detail.id,
+                tr!("Could not write {name}'s settings: {e}", name = "Eden", e),
+            );
+        }
         let id = detail.id;
         let save_dir = paths::game_save_dir(&paths::data_dir(), &self.server(), id);
         let capture_exe = exe.clone();
