@@ -133,7 +133,9 @@ fn run(args: &Args, frontend: &mut Frontend, link: &Link) -> anyhow::Result<()> 
     let _ = frame::unlink(&args.frames);
     std::fs::create_dir_all(&args.save_dir)?;
     std::fs::create_dir_all(&args.system_dir)?;
-    lr::set_core_dirs(Some(&args.system_dir), Some(&args.save_dir));
+    let system_dir = core_system_dir(&args.core, &args.system_dir, &args.save_dir)
+        .context("preparing core system storage")?;
+    lr::set_core_dirs(Some(&system_dir), Some(&args.save_dir));
 
     let vulkan_library = args.vulkan.then(hw_vulkan::library_path);
     let hw_ctx: Option<Box<dyn lr::HwContextProvider>> = match &vulkan_library {
@@ -509,6 +511,38 @@ fn src_format(format: lr::PixelFormat) -> SrcFormat {
     }
 }
 
+/// PCSX2 writes caches and BIOS sidecars alongside its BIOS images.
+/// Keep these writes in the game folder, away from downloaded BIOS files.
+fn core_system_dir(
+    core: &std::path::Path,
+    system: &std::path::Path,
+    saves: &std::path::Path,
+) -> std::io::Result<PathBuf> {
+    let name = core
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    if name != "pcsx2_libretro" {
+        return Ok(system.to_path_buf());
+    }
+    let runtime = saves.join("system");
+    let bios = runtime.join("pcsx2/bios");
+    std::fs::create_dir_all(&bios)?;
+    std::fs::create_dir_all(runtime.join("pcsx2/cache"))?;
+    for entry in std::fs::read_dir(system.join("pcsx2/bios"))? {
+        let entry = entry?;
+        if !entry.file_type()?.is_file() {
+            continue;
+        }
+        let dest = bios.join(entry.file_name());
+        // Refresh BIOS images; retain runtime NVRAM and other mutable sidecars.
+        if (4 << 20..=8 << 20).contains(&entry.metadata()?.len()) || !dest.exists() {
+            std::fs::copy(entry.path(), dest)?;
+        }
+    }
+    Ok(runtime)
+}
+
 fn core_home(save_dir: &std::path::Path) -> PathBuf {
     save_dir.join("home")
 }
@@ -555,6 +589,41 @@ mod tests {
         assert_eq!(
             core_home(save),
             PathBuf::from("/data/saves/server-1/7/home")
+        );
+    }
+
+    #[test]
+    fn ps2_runtime_storage_preserves_nvram_and_protects_downloaded_bios() {
+        let dir = tempfile::tempdir().unwrap();
+        let system = dir.path().join("system");
+        let saves = dir.path().join("saves");
+        let bios = system.join("pcsx2/bios");
+        std::fs::create_dir_all(&bios).unwrap();
+        std::fs::write(bios.join("console.bin"), vec![1; 4 << 20]).unwrap();
+        std::fs::write(bios.join("console.nvm"), b"original").unwrap();
+        let core = std::path::Path::new("pcsx2_libretro.so");
+        let runtime = core_system_dir(core, &system, &saves).unwrap();
+        assert!(runtime.starts_with(&saves));
+        assert!(runtime.join("pcsx2/cache").is_dir());
+        let runtime_bios = runtime.join("pcsx2/bios");
+        std::fs::write(runtime_bios.join("console.nvm"), b"saved").unwrap();
+        std::fs::write(bios.join("console.bin"), vec![2; 4 << 20]).unwrap();
+        core_system_dir(core, &system, &saves).unwrap();
+        assert_eq!(
+            std::fs::read(runtime_bios.join("console.nvm")).unwrap(),
+            b"saved"
+        );
+        assert_eq!(
+            std::fs::read(runtime_bios.join("console.bin")).unwrap(),
+            vec![2; 4 << 20]
+        );
+        assert_eq!(
+            std::fs::read(bios.join("console.nvm")).unwrap(),
+            b"original"
+        );
+        assert_eq!(
+            core_system_dir(std::path::Path::new("snes9x_libretro.so"), &system, &saves).unwrap(),
+            system
         );
     }
 
