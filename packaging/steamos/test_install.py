@@ -29,7 +29,7 @@ def desktop_args(command):
 
 
 class InstallerTests(unittest.TestCase):
-    def run_install(self, home, corrupt=False, add=True):
+    def run_install(self, home, corrupt=False, add=True, existing=False):
         name = 'RomP-nightly-x86_64.AppImage'
         url = 'https://github.com/aaronflorey/RomP/releases/download/nightly/'
         release = {'assets': [{'name': n, 'browser_download_url': url + n}
@@ -54,8 +54,15 @@ class InstallerTests(unittest.TestCase):
              patch.dict(install.os.environ, {'XDG_DATA_HOME': str(home / 'data')}), \
              patch.object(install.urllib.request, 'urlopen', return_value=io.BytesIO(json.dumps(release).encode())) as fetch, \
              patch.object(install, 'download', side_effect=download), \
-             patch.object(install.subprocess, 'run', side_effect=run) as calls:
+             patch.object(install.subprocess, 'run', side_effect=run) as calls, \
+             patch.object(install, 'install_artwork') as artwork, \
+             patch.object(install, 'steam_shortcuts', return_value=[('grid', 321)] if existing else []):
+
             install.install()
+            if add or existing:
+                artwork.assert_called_once_with(home / "Applications/RomP")
+            else:
+                artwork.assert_not_called()
             fetch.assert_called_once()
             self.assertEqual(fetch.call_args.args[0].full_url,
                              'https://api.github.com/repos/aaronflorey/RomP/releases/tags/nightly')
@@ -70,8 +77,16 @@ class InstallerTests(unittest.TestCase):
             self.assertTrue(image.stat().st_mode & 0o111)
             launcher = home / 'data/applications/io.github.rompemu.romp.desktop'
             self.assertIn('--appimage-extract-and-run', launcher.read_text())
-            self.assertEqual(calls.call_args.args[0], ['/usr/bin/steamos-add-to-steam', str(launcher)])
-            calls = self.run_install(home, add=False)
+            helper_calls = [c.args[0] for c in calls.call_args_list
+                            if c.args[0][0] == '/usr/bin/steamos-add-to-steam']
+            self.assertEqual(helper_calls, [['/usr/bin/steamos-add-to-steam', str(launcher)]])
+            calls = self.run_install(home, existing=True)
+            self.assertTrue(all(c.args[0][0] == 'kdialog' for c in calls.call_args_list))
+            self.assertFalse(any('--yesno' in c.args[0] for c in calls.call_args_list))
+
+    def test_declining_steam_add_skips_artwork(self):
+        with tempfile.TemporaryDirectory() as temp:
+            calls = self.run_install(Path(temp), add=False)
             self.assertTrue(all(c.args[0][0] == 'kdialog' for c in calls.call_args_list))
 
     def test_checksum_failure_preserves_old_app(self):
@@ -101,3 +116,50 @@ class InstallerTests(unittest.TestCase):
         args = desktop_args(command)
         self.assertEqual(args[:2], ['bash', '-c'])
         subprocess.run(['bash', '-n', '-c', args[2]], check=True)
+
+
+class ArtworkTests(unittest.TestCase):
+    def fixture(self, executable, appid=321):
+        def text(key, value):
+            return b'\x01' + key.encode() + b'\0' + value.encode() + b'\0'
+        return (b'\x00shortcuts\0\x000\0\x02appid\0' + appid.to_bytes(4, 'little')
+                + text('AppName', 'RomP') + text('Exe', executable)
+                + b'\x00tags\0\x08\x08\x08\x08')
+
+    def test_artwork_matches_saved_shortcut_and_refreshes_art(self):
+        with tempfile.TemporaryDirectory() as temp:
+            home = Path(temp)
+            folder = home / 'Applications/RomP'
+            folder.mkdir(parents=True)
+            config = home / '.local/share/Steam/userdata/123/config'
+            config.mkdir(parents=True)
+            database = self.fixture('"' + str(folder / 'RomP.AppImage') + '"')
+            (config / 'shortcuts.vdf').write_bytes(database)
+            grid = config / 'grid'
+            grid.mkdir()
+            (grid / '321p.jpg').write_bytes(b'custom')
+            (grid / '321_hero.png').write_bytes(b'old hero')
+            payload = b'\x89PNG\r\n\x1a\nfixture'
+            with patch.object(install.Path, 'home', return_value=home), \
+                 patch.object(install.subprocess, 'run'), \
+                 patch.object(install.urllib.request, 'urlopen', side_effect=lambda *a, **k: io.BytesIO(payload)):
+                install.install_artwork(folder)
+                install.install_artwork(folder)
+            self.assertEqual((grid / '321_hero.png').read_bytes(), payload)
+            self.assertEqual((grid / '321_logo.png').read_bytes(), payload)
+            self.assertEqual((grid / '321.png').read_bytes(), payload)
+            self.assertEqual((grid / '321p.png').read_bytes(), payload)
+            self.assertFalse((grid / '321p.jpg').exists())
+            self.assertEqual((config / 'shortcuts.vdf').read_bytes(), database)
+
+    def test_malformed_shortcuts_rejected(self):
+        for data in (b'', b'\x00shortcuts', b'\x03bad\0', b'\x02appid\0\x01'):
+            with self.subTest(data=data), self.assertRaises((ValueError, IndexError)):
+                install.read_shortcuts(data)
+
+    def test_missing_shortcut_is_actionable(self):
+        with tempfile.TemporaryDirectory() as temp, \
+             patch.object(install.Path, 'home', return_value=Path(temp)), \
+             patch.object(install.subprocess, 'run'):
+            with self.assertRaisesRegex(RuntimeError, 'saved Steam shortcut was not found'):
+                install.install_artwork(Path(temp))

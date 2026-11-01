@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the nightly RomP AppImage without modifying SteamOS or Steam's files."""
+"""Install the nightly RomP AppImage and Steam library artwork without modifying SteamOS."""
 
 import hashlib
 import json
@@ -28,6 +28,93 @@ def desktop_quote(value):
         raise ValueError("Unsupported character in installation path")
     quoted = ''.join('\\' + c if c in '\\"`$' else c for c in value)
     return '"' + quoted.replace('\\', '\\\\') + '"'
+
+
+def read_shortcuts(data):
+    """Read Steam's binary KeyValues; never rewrite its shortcut database."""
+    offset = 0
+
+    def string():
+        nonlocal offset
+        end = data.index(b"\0", offset)
+        value = data[offset:end].decode("utf-8")
+        offset = end + 1
+        return value
+
+    def object_(depth=0):
+        nonlocal offset
+        if depth > 16:
+            raise ValueError("Steam shortcut nesting is too deep")
+        result = {}
+        while True:
+            kind = data[offset]
+            offset += 1
+            if kind == 8:
+                return result
+            key = string().lower()
+            if kind == 0:
+                result[key] = object_(depth + 1)
+            elif kind == 1:
+                result[key] = string()
+            elif kind == 2:
+                if offset + 4 > len(data):
+                    raise ValueError("Truncated Steam shortcut integer")
+                result[key] = int.from_bytes(data[offset:offset + 4], "little")
+                offset += 4
+            else:
+                raise ValueError(f"Unsupported Steam shortcut value type: {kind}")
+
+    return object_().get("shortcuts", {})
+
+
+def steam_shortcuts(folder):
+    roots = {p.resolve() for p in (
+        Path.home() / ".steam/steam", Path.home() / ".steam/root",
+        Path.home() / ".local/share/Steam",
+    ) if p.is_dir()}
+    matches = []
+    for root in roots:
+        for database in (root / "userdata").glob("*/config/shortcuts.vdf"):
+            for entry in read_shortcuts(database.read_bytes()).values():
+                if (isinstance(entry, dict) and entry.get("appname") == "RomP"
+                        and str(folder / "RomP.AppImage") in entry.get("exe", "")
+                        and isinstance(entry.get("appid"), int)):
+                    matches.append((database.parent / "grid", entry["appid"]))
+    return matches
+
+
+def install_artwork(folder):
+    matches = steam_shortcuts(folder)
+    if not matches:
+        raise RuntimeError("RomP is installed, but its saved Steam shortcut was not found. "
+                           "Exit Steam and rerun the installer.")
+    artwork = {"capsule.png": "p", "header.png": "", "hero.png": "_hero",
+               "logo.png": "_logo", "icon.png": "_icon"}
+    with tempfile.TemporaryDirectory(prefix=".artwork-", dir=folder) as staging:
+        for name in artwork:
+            target = Path(staging) / name
+            url = f"https://raw.githubusercontent.com/{REPO}/main/packaging/steamos/artwork/{name}"
+            with urllib.request.urlopen(url, timeout=60) as source, target.open("wb") as dest:
+                shutil.copyfileobj(source, dest)
+            if not target.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"):
+                raise ValueError(f"Invalid artwork download: {name}")
+        for grid, appid in matches:
+            grid.mkdir(parents=True, exist_ok=True)
+            for name, suffix in artwork.items():
+                target = grid / f"{appid}{suffix}.png"
+                # Stage beside the destination so replacement is atomic.
+                with tempfile.NamedTemporaryFile(dir=grid, delete=False) as dest:
+                    staged = Path(dest.name)
+                    try:
+                        dest.write((Path(staging) / name).read_bytes())
+                        dest.flush()
+                        staged.replace(target)
+                    finally:
+                        staged.unlink(missing_ok=True)
+                for extension in ("jpg", "jpeg", "webp", "tga"):
+                    target.with_suffix("." + extension).unlink(missing_ok=True)
+    subprocess.run(["kdialog", "--title", "RomP ready", "--msgbox",
+                    "Steam artwork installed. Restart Steam or return to Gaming Mode."], check=True)
 
 
 def install():
@@ -84,14 +171,22 @@ def install():
         "Icon=applications-games\nCategories=Game;Emulator;\nTerminal=false\n"
     )
     launcher.chmod(0o755)
-    add = subprocess.run(["kdialog", "--title", "RomP installed", "--yesno",
-                          "Add RomP to Steam now? If RomP is already in Steam, choose No "
-                          "to avoid a duplicate. You can then return to Gaming Mode and "
-                          "launch RomP. Use Steam + X when you need the on-screen keyboard."])
-    if add.returncode == 0:
-        subprocess.run([helper, str(launcher)], check=True)
-    elif add.returncode != 1:
-        raise RuntimeError("Could not display the Add to Steam prompt.")
+    subprocess.run(["kdialog", "--title", "RomP Steam artwork", "--msgbox",
+                    "Exit Steam using Steam → Exit, then click OK. This saves any existing "
+                    "RomP shortcut so the installer can reuse it and update its artwork."], check=True)
+    if not steam_shortcuts(folder):
+        add = subprocess.run(["kdialog", "--title", "RomP installed", "--yesno",
+                              "Add RomP to Steam now?"])
+        if add.returncode == 0:
+            subprocess.run([helper, str(launcher)], check=True)
+            subprocess.run(["kdialog", "--title", "RomP Steam artwork", "--msgbox",
+                            "Finish adding RomP, then exit Steam using Steam → Exit. "
+                            "Click OK once Steam has closed to install the artwork."], check=True)
+        elif add.returncode == 1:
+            return
+        else:
+            raise RuntimeError("Could not display the Add to Steam prompt.")
+    install_artwork(folder)
 
 
 if __name__ == "__main__":
