@@ -91,6 +91,9 @@ fn main() -> anyhow::Result<()> {
     if std::env::args().nth(1).as_deref() == Some("--probe-vulkan") {
         std::process::exit(if hw_vulkan::probe() { 0 } else { 1 });
     }
+    // A core's fault filter passes on the faults it doesn't claim, to whatever came before it.
+    #[cfg(target_os = "linux")]
+    romp_runner::crash::install();
     let args = Args::parse();
     lr::set_core_log_min(core_log_min(std::env::var("RUST_LOG").ok().as_deref()));
     #[cfg(windows)]
