@@ -65,7 +65,7 @@ pub async fn install(emulator: &Emulator, http: &reqwest::Client) -> Result<Path
 pub fn missing(source: &Path) -> Vec<String> {
     [
         (!source.join("prod.keys").is_file(), "prod.keys"),
-        (matches!(find_firmware(source), Ok(None)), "firmware.zip"),
+        (find_firmware(source).is_none(), "firmware.zip"),
     ]
     .into_iter()
     .filter(|(absent, _)| *absent)
@@ -74,46 +74,52 @@ pub fn missing(source: &Path) -> Vec<String> {
 }
 
 pub fn is_firmware_archive(name: &str) -> bool {
-    let name = name.to_ascii_lowercase();
-    name == "firmware.zip"
-        || name
-            .strip_prefix("firmware.")
-            .and_then(|version| version.strip_suffix(".zip"))
-            .is_some_and(|version| {
-                version
-                    .split('.')
-                    .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
-            })
+    Path::new(name)
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("zip"))
 }
 
-fn find_firmware(source: &Path) -> Result<Option<PathBuf>, String> {
-    let canonical = source.join("firmware.zip");
-    if canonical.is_file() {
-        return Ok(Some(canonical));
-    }
-    let Ok(entries) = std::fs::read_dir(source) else {
-        return Ok(None);
-    };
-    let mut archives = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let name = entry.file_name();
-        let name = name.to_string_lossy();
-        if path.is_file() && is_firmware_archive(&name) {
-            if name.eq_ignore_ascii_case("firmware.zip") {
-                return Ok(Some(path));
+pub(crate) fn firmware_version(name: &str) -> Option<Vec<u64>> {
+    name.split(|c: char| !c.is_ascii_digit() && c != '.')
+        .filter_map(|candidate| {
+            let parts = candidate.trim_matches('.').split('.').collect::<Vec<_>>();
+            if parts.len() < 2 {
+                return None;
             }
-            archives.push(path);
-        }
-    }
-    match archives.len() {
-        0 => Ok(None),
-        1 => Ok(archives.pop()),
-        _ => Err(tr::tr!(
-            "Several Switch firmware archives are available in {}. Rename the one to use to firmware.zip in that folder.",
-            source.display()
-        )),
-    }
+            let mut version = parts
+                .iter()
+                .map(|part| part.parse().ok())
+                .collect::<Option<Vec<u64>>>()?;
+            while version.last() == Some(&0) {
+                version.pop();
+            }
+            Some(version)
+        })
+        .max()
+}
+
+fn find_firmware(source: &Path) -> Option<PathBuf> {
+    std::fs::read_dir(source)
+        .ok()?
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let metadata = entry.metadata().ok()?;
+            if !metadata.is_file() || !is_firmware_archive(&name) {
+                return None;
+            }
+            Some((
+                (
+                    firmware_version(&name),
+                    metadata.modified().ok(),
+                    path.clone(),
+                ),
+                path,
+            ))
+        })
+        .max_by(|(a, _), (b, _)| a.cmp(b))
+        .map(|(_, path)| path)
 }
 
 fn valid_keys(text: &str) -> bool {
@@ -165,7 +171,7 @@ pub fn prepare(exe: &Path, source: &Path) -> Result<(), String> {
         }
         imports.push((name, text));
     }
-    let firmware = find_firmware(source)?.ok_or("Switch firmware.zip is missing")?;
+    let firmware = find_firmware(source).ok_or("Switch firmware.zip is missing")?;
     tracing::info!(firmware_name = ?firmware.file_name(), "Switch firmware selected");
     install_firmware(&firmware, &home)
         .map_err(|e| format!("Could not install Switch firmware: {e}"))?;
@@ -364,23 +370,44 @@ mod tests {
     }
 
     #[test]
-    fn imports_a_versioned_firmware_dump_and_reports_ambiguous_versions() {
+    fn firmware_versions_and_unversioned_zip_fallback() {
+        assert_eq!(
+            firmware_version("Switch Firmware v19.0.10 (Rebootless).zip"),
+            Some(vec![19, 0, 10])
+        );
+        assert_eq!(firmware_version("Firmware_20.1.0.zip"), Some(vec![20, 1]));
+        assert_eq!(firmware_version("firmware.zip"), None);
+        let dir = tempfile::tempdir().unwrap();
+        for (name, seconds) in [("firmware.zip", 10), ("dump.zip", 20)] {
+            let path = dir.path().join(name);
+            let file = std::fs::File::create(&path).unwrap();
+            file.set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds))
+                .unwrap();
+        }
+        assert_eq!(
+            find_firmware(dir.path()).unwrap().file_name().unwrap(),
+            "dump.zip"
+        );
+        std::fs::write(dir.path().join("Firmware v9.0.0.zip"), b"versioned").unwrap();
+        assert_eq!(
+            find_firmware(dir.path()).unwrap().file_name().unwrap(),
+            "Firmware v9.0.0.zip"
+        );
+    }
+
+    #[test]
+    fn imports_the_newest_versioned_firmware() {
         for accepted in ["firmware.zip", "FIRMWARE.ZIP", "Firmware.18.0.1.zip"] {
             assert!(is_firmware_archive(accepted));
         }
-        for rejected in [
-            "unrelated.zip",
-            "firmware.backup.zip",
-            "Firmware..zip",
-            "firmware.18.zip.part",
-        ] {
+        for rejected in ["firmware.18.zip.part", "prod.keys"] {
             assert!(!is_firmware_archive(rejected));
         }
         let dir = tempfile::tempdir().unwrap();
         let source = dir.path().join("source");
         std::fs::create_dir(&source).unwrap();
         std::fs::write(source.join("prod.keys"), "master_key_00 = 0123abcd").unwrap();
-        std::fs::write(source.join("unrelated.zip"), b"unrelated").unwrap();
+        std::fs::write(source.join("unrelated.txt"), b"unrelated").unwrap();
         assert_eq!(missing(&source), ["firmware.zip"]);
         let name = "0123456789abcdef0123456789abcdef.nca";
         let archive = firmware(name, b"versioned");
@@ -393,12 +420,18 @@ mod tests {
             .join("user/nand/system/Contents/registered")
             .join(name);
         assert_eq!(std::fs::read(&installed).unwrap(), b"versioned");
-        std::fs::write(source.join("Firmware.19.0.0.zip"), &archive).unwrap();
-        assert!(prepare(&exe, &source).unwrap_err().contains("firmware.zip"));
-        assert_eq!(std::fs::read(&installed).unwrap(), b"versioned");
+        for version in ["9.0.0", "19.0.0", "19.0.10", "19.0.2"] {
+            std::fs::write(
+                source.join(format!("Firmware.{version}.zip")),
+                firmware(name, version.as_bytes()),
+            )
+            .unwrap();
+        }
+        prepare(&exe, &source).unwrap();
+        assert_eq!(std::fs::read(&installed).unwrap(), b"19.0.10");
         std::fs::write(source.join("firmware.zip"), firmware(name, b"selected")).unwrap();
         prepare(&exe, &source).unwrap();
-        assert_eq!(std::fs::read(installed).unwrap(), b"selected");
+        assert_eq!(std::fs::read(installed).unwrap(), b"19.0.10");
     }
 
     #[test]

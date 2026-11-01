@@ -815,7 +815,7 @@ impl Controller {
                 };
                 let system = paths::system_dir();
                 let mut missing = bios::missing(eden::PLATFORM, &system);
-                if !missing.is_empty() && !offline {
+                if !offline {
                     if let Some(client) = &client {
                         missing = bios::ensure(
                             client,
