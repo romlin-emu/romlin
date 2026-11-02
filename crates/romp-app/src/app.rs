@@ -117,6 +117,7 @@ struct Controller {
     other_save: RefCell<Option<(i64, crate::saves::OtherSave)>>,
     playing: RefCell<Option<crate::store::GameDetail>>,
     syncing_game: Cell<Option<i64>>,
+    installing_textures: Cell<bool>,
     downloaded_choice: Cell<bool>,
     icon_requests: RefCell<HashSet<String>>,
     running: RefCell<Option<crate::play::RunningGame>>,
@@ -222,6 +223,7 @@ pub fn run(game_mode: bool) -> anyhow::Result<()> {
         other_save: RefCell::new(None),
         playing: RefCell::new(None),
         syncing_game: Cell::new(None),
+        installing_textures: Cell::new(false),
         downloaded_choice: Cell::new(false),
         icon_requests: RefCell::default(),
         running: RefCell::new(None),
@@ -389,6 +391,7 @@ impl Controller {
         ui.on_download_game(|| with_controller(|c| c.download_game()));
         ui.on_cancel_download(|| with_controller(|c| c.cancel_download()));
         ui.on_play_game(|| with_controller(|c| c.play_game()));
+        ui.on_install_textures(|| with_controller(|c| c.install_textures()));
         ui.on_delete_game(|| with_controller(|c| c.delete_game()));
         ui.on_keep_local_save(|| with_controller(|c| c.keep_save(crate::saves::Keep::Local)));
         ui.on_keep_server_save(|| with_controller(|c| c.keep_save(crate::saves::Keep::Server)));

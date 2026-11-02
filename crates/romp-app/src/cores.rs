@@ -3,7 +3,13 @@ use std::io::Read;
 use std::path::PathBuf;
 
 pub const BUILDBOT: &str = "https://buildbot.libretro.com/nightly";
-pub const ARMSX2_RELEASE: &str = "https://github.com/RompEmu/ARMSX2/releases/latest/download";
+pub const ARMSX2_RELEASE: &str = PS2_RELEASE;
+const PS2_RELEASE: &str = "https://github.com/RompEmu/RomP/releases/download/ps2-cores";
+#[cfg(windows)]
+const PCSX2_ASSET: &str = "pcsx2_libretro-windows-x86_64.zip";
+#[cfg(not(windows))]
+const PCSX2_ASSET: &str = "pcsx2_libretro-linux-x86_64.zip";
+const PCSX2: CoreInfo = core("pcsx2", "PCSX2", "pcsx2_libretro", true);
 const ARMSX2_ASSET: &str = "armsx2_libretro-macos-arm64.zip";
 pub const FAKE08_RELEASE: &str = "https://github.com/RompEmu/fake-08/releases/latest/download";
 #[cfg(target_os = "macos")]
@@ -28,10 +34,11 @@ const fn core(id: &'static str, name: &'static str, lib: &'static str, jit: bool
 const ARMSX2: CoreInfo = core("armsx2", "ARMSX2", "armsx2_libretro", true);
 const FAKE08: CoreInfo = core("fake08", "FAKE-08", "fake08_libretro", false);
 
-/// Cores the libretro buildbot doesn't build, published from RompEmu's own forks:
+/// Cores published by RompEmu, including PS2 builds with per-game texture loading:
 /// (core, where its releases are, this computer's file).
-const RELEASED: [(&CoreInfo, &str, &str); 2] = [
+const RELEASED: [(&CoreInfo, &str, &str); 3] = [
     (&ARMSX2, ARMSX2_RELEASE, ARMSX2_ASSET),
+    (&PCSX2, PS2_RELEASE, PCSX2_ASSET),
     (&FAKE08, FAKE08_RELEASE, FAKE08_ASSET),
 ];
 
@@ -45,7 +52,7 @@ fn released(core: &CoreInfo) -> Option<(&'static str, &'static str)> {
 #[cfg(target_os = "macos")]
 const PS2: CoreInfo = ARMSX2;
 #[cfg(all(target_arch = "x86_64", not(target_os = "macos")))]
-const PS2: CoreInfo = core("pcsx2", "PCSX2", "pcsx2_libretro", true);
+const PS2: CoreInfo = PCSX2;
 #[cfg(not(any(target_os = "macos", target_arch = "x86_64")))]
 const PS2: CoreInfo = core("play", "Play!", "play_libretro", true);
 
@@ -497,6 +504,8 @@ struct Manifest {
     file: String,
     sha256: String,
     version: String,
+    #[serde(default)]
+    texture_replacements: bool,
 }
 
 pub fn sha256_hex(bytes: &[u8]) -> String {
@@ -639,6 +648,13 @@ impl Cores {
             .is_ok_and(|latest| latest != manifest.version)
     }
 
+    pub fn supports_texture_replacements(&self, core: &CoreInfo) -> bool {
+        std::fs::read(self.dir.join(core.id).join("manifest.json"))
+            .ok()
+            .and_then(|m| serde_json::from_slice::<Manifest>(&m).ok())
+            .is_some_and(|m| m.texture_replacements)
+    }
+
     pub fn installed(&self, core: &CoreInfo) -> Option<PathBuf> {
         let dir = self.dir.join(core.id);
         let manifest: Manifest =
@@ -720,6 +736,7 @@ impl Cores {
             file,
             sha256: sha256_hex(&lib),
             version,
+            texture_replacements: matches!(core.id, "pcsx2" | "armsx2"),
         };
         tokio::fs::write(
             dir.join("manifest.json"),
@@ -885,6 +902,20 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(std::fs::read(&installed).unwrap(), b"ps2");
+        assert!(cores.supports_texture_replacements(&ARMSX2));
+        let manifest_path = dir.path().join("armsx2/manifest.json");
+        let mut legacy: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&manifest_path).unwrap()).unwrap();
+        legacy
+            .as_object_mut()
+            .unwrap()
+            .remove("texture_replacements");
+        std::fs::write(&manifest_path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+        assert!(!cores.supports_texture_replacements(&ARMSX2));
+        assert!(
+            cores.installed(&ARMSX2).is_some(),
+            "old cores still play games without packs"
+        );
         assert!(installed.ends_with(format!("armsx2/{}", lib_file(&ARMSX2))));
     }
 

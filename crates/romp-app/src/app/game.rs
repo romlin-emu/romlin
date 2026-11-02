@@ -277,6 +277,58 @@ impl Controller {
         });
     }
 
+    pub(super) fn install_textures(&self) {
+        let Some(detail) = self.current_game() else {
+            return;
+        };
+        if self.installing_textures.get()
+            || self.playing.borrow().is_some()
+            || self.preparing.get()
+            || !core_for_platform(&detail.platform_slug)
+                .is_some_and(|c| matches!(c.id, "pcsx2" | "armsx2"))
+        {
+            return;
+        }
+        let id = detail.id;
+        let save = paths::game_save_dir(&paths::data_dir(), &self.server(), id);
+        self.installing_textures.set(true);
+        self.refresh_game_page(false);
+        let picker = rfd::AsyncFileDialog::new()
+            .set_title(tr!("Select a texture replacements ZIP"))
+            .add_filter("ZIP", &["zip"])
+            .pick_file();
+        self.shared.rt.spawn(async move {
+            let result = if let Some(file) = picker.await {
+                on_ui(move |c| c.game_status(id, tr!("Installing texture pack…")));
+                Some(
+                    tokio::task::spawn_blocking(move || {
+                        crate::textures::install(file.path(), &save)
+                    })
+                    .await
+                    .map_err(|e| e.to_string())
+                    .and_then(|r| r.map_err(|e| format!("{e:#}"))),
+                )
+            } else {
+                None
+            };
+            on_ui(move |c| {
+                c.installing_textures.set(false);
+                c.refresh_game_page(false);
+                if let Some(result) = result {
+                    c.game_status(
+                        id,
+                        match result {
+                            Ok(()) => tr!(
+                                "Texture pack installed. It will load when you start this game."
+                            ),
+                            Err(error) => tr!("Could not install texture pack: {}", error),
+                        },
+                    );
+                }
+            });
+        });
+    }
+
     pub(super) fn refresh_game_page(&self, reload: bool) {
         let Some(ui) = self.ui() else { return };
         let Some(mut detail) = self.current_game() else {
@@ -318,6 +370,21 @@ impl Controller {
             ui.set_game_progress(self.download_fraction.get());
         }
         ui.set_game_playable(playable);
+        ui.set_game_supports_textures(
+            core_for_platform(&detail.platform_slug)
+                .is_some_and(|c| matches!(c.id, "pcsx2" | "armsx2")),
+        );
+        ui.set_game_textures_busy(self.installing_textures.get());
+        ui.set_game_has_textures(
+            paths::game_save_dir(&paths::data_dir(), &self.server(), detail.id)
+                .join("textures/replacements")
+                .is_dir(),
+        );
+        ui.set_game_can_install_textures(
+            !self.installing_textures.get()
+                && self.playing.borrow().is_none()
+                && !self.preparing.get(),
+        );
         self.refresh_collection_controls(detail.id);
         ui.set_game_can_download(!self.offline.get() && self.downloading_id().is_none());
         if !playable {
@@ -559,6 +626,9 @@ impl Controller {
 
     /// Plays the current game, from a save slot when one is given.
     pub(super) fn play_game_from(&self, slot: Option<u8>) {
+        if self.installing_textures.get() {
+            return;
+        }
         let Some(ui) = self.ui() else { return };
         let Some(detail) = self.current_game() else {
             return;
@@ -586,6 +656,22 @@ impl Controller {
         let Some(core) = core_for_platform(&detail.platform_slug) else {
             return;
         };
+        let texture_save = paths::game_save_dir(&paths::data_dir(), &self.server(), detail.id);
+        if let Err(error) = crate::textures::recover(&texture_save) {
+            ui.set_game_status(tr!("Could not recover texture pack: {}", error).into());
+            return;
+        }
+        let texture_pack = texture_save.join("textures/replacements").is_dir();
+        if texture_pack
+            && self.offline.get()
+            && !self.shared.cores.supports_texture_replacements(core)
+        {
+            ui.set_game_status(
+                tr!("Connect to the internet once to install the PS2 core with texture support.")
+                    .into(),
+            );
+            return;
+        }
         self.requested_slot.set(slot);
         self.preparing.set(true);
         ui.set_game_status(tr!("Getting ready…").into());
@@ -603,7 +689,10 @@ impl Controller {
         self.shared.rt.spawn(async move {
             let base = crate::cores::download_base(core);
             let current = match cores.installed(core) {
-                Some(path) if offline || !cores.update_available(&http, base, core).await => {
+                Some(path)
+                    if (offline || !cores.update_available(&http, base, core).await)
+                        && (!texture_pack || cores.supports_texture_replacements(core)) =>
+                {
                     Some(path)
                 }
                 _ => None,

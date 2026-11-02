@@ -1416,6 +1416,11 @@ component GamePage inherits FocusScope {
     callback cancel();
     callback play();
     callback delete();
+    in property <bool> supports-textures;
+    in property <bool> has-textures;
+    in property <bool> can-install-textures;
+    in property <bool> textures-busy;
+    callback install-textures();
     callback open-game(int);
     in property <bool> show-collections;
     in property <bool> can-edit-collections;
@@ -1535,12 +1540,17 @@ component GamePage inherits FocusScope {
                                 visible: root.downloaded || root.busy || root.playable;
                                 text: root.busy ? @tr("Cancel") : root.downloaded ? @tr("Play") : @tr("Download");
                                 primary: !root.busy;
-                                enabled: root.busy || root.downloaded || root.can-download;
+                                enabled: !root.textures-busy && (root.busy || root.downloaded || root.can-download);
                                 clicked => {
                                     if root.busy { root.cancel(); }
                                     else if root.downloaded { root.play(); }
                                     else { root.download(); }
                                 }
+                            }
+                            if root.supports-textures: Button {
+                                text: root.textures-busy ? @tr("Installing textures…") : root.has-textures ? @tr("Replace texture ZIP…") : @tr("Install texture ZIP…");
+                                enabled: root.can-install-textures;
+                                clicked => { if root.can-install-textures { root.install-textures(); } }
                             }
                             if root.downloaded && !root.busy: Button { text: @tr("Delete download"); clicked => { root.delete(); } }
                             if root.show-collections: Button {
@@ -2818,6 +2828,11 @@ export component AppWindow inherits Window {
     callback cancel-download();
     callback play-game();
     callback delete-game();
+    in property <bool> game-supports-textures;
+    in property <bool> game-has-textures;
+    in property <bool> game-can-install-textures;
+    in property <bool> game-textures-busy;
+    callback install-textures();
     in property <bool> save-conflict;
     in property <string> conflict-text;
     callback keep-local-save();
@@ -3063,6 +3078,11 @@ export component AppWindow inherits Window {
             cancel => { root.cancel-download(); }
             play => { root.play-game(); }
             delete => { root.delete-game(); }
+            supports-textures: root.game-supports-textures;
+            has-textures: root.game-has-textures;
+            can-install-textures: root.game-can-install-textures;
+            textures-busy: root.game-textures-busy;
+            install-textures => { root.install-textures(); }
             conflict: root.save-conflict;
             conflict-text: root.conflict-text;
             keep-local => { root.keep-local-save(); }
