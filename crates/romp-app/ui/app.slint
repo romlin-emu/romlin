@@ -50,12 +50,11 @@ component PadBadge inherits Rectangle {
 }
 
 export global Brand {
-    out property <string> name: "RomP";
-    out property <string> website: "https://github.com/RompEmu/RomP";
-    out property <string> website-label: "github.com/RompEmu/RomP";
-    out property <string> author: "Beshr Kayali Reinholdsson";
-    out property <string> author-website: "https://beshr.com";
-    out property <string> translate-website: "https://crowdin.com/project/romp";
+    out property <string> name: "Romlin";
+    out property <string> website: "https://github.com/romlin-emu/romlin";
+    out property <string> website-label: "github.com/romlin-emu/romlin";
+    out property <string> author: "Romlin contributors · based on RomP by Beshr Kayali Reinholdsson";
+    out property <string> author-website: "https://github.com/romlin-emu";
     out property <string> tagline: @tr("Play your RomM library, each game in its own sandboxed emulator.");
 }
 
@@ -275,7 +274,7 @@ component Welcome inherits SetupFrame {
         Feature {
             icon: @image-url("icons/play.svg");
             title: @tr("Emulators taken care of");
-            text: @tr("RomP sets up the right emulator for each game and runs it in a sandbox.");
+            text: @tr("Romlin sets up the right emulator for each game and runs it in a sandbox.");
         }
     }
     Row {
@@ -310,7 +309,7 @@ component Connect inherits SetupFrame {
             accepted => { root.connect(); }
         }
         if root.error == "": Text { horizontal-alignment: Locale.start;
-            text: @tr("RomP works with RomM 5.0 or newer.");
+            text: @tr("Romlin works with RomM 5.0 or newer.");
             font-size: Theme.font-small;
             color: Theme.text-subtle;
         }
@@ -1136,8 +1135,8 @@ component Library inherits Rectangle {
                                 vertical-alignment: center;
                                 horizontal-stretch: 1;
                                 text: root.update-homebrew
-                                    ? @tr("RomP {} is available. Run “brew upgrade romp” to update.", root.update-version)
-                                    : @tr("RomP {} is available.", root.update-version);
+                                    ? @tr("Romlin {} is available. Run “brew upgrade romlin” to update.", root.update-version)
+                                    : @tr("Romlin {} is available.", root.update-version);
                                 font-size: Theme.font-small;
                                 font-weight: 600;
                                 color: Theme.accent-text;
@@ -1146,7 +1145,7 @@ component Library inherits Rectangle {
                             if !root.update-homebrew: Button { text: @tr("Download"); primary: true; clicked => { root.update-download(); } }
                             Button { text: @tr("What's new"); clicked => { root.update-notes(); } }
                             Button { text: @tr("Skip this version"); clicked => { root.update-skip(); } }
-                            IconButton { icon: @image-url("icons/close.svg"); tooltip: @tr("Hide until RomP restarts"); clicked => { root.update-dismiss(); } }
+                            IconButton { icon: @image-url("icons/close.svg"); tooltip: @tr("Hide until Romlin restarts"); clicked => { root.update-dismiss(); } }
                         }
                     }
                     grid := Rectangle {
@@ -1980,8 +1979,6 @@ component SettingsPage inherits FocusScope {
     in-out property <bool> accept-installs;
     in-out property <float> volume;
     in-out property <int> ui-scale;
-    in property <[string]> languages;
-    in-out property <int> language;
     callback prefs-changed();
     in-out property <bool> nintendo-labels;
     in-out property <bool> stick-dpad;
@@ -2092,30 +2089,12 @@ component SettingsPage inherits FocusScope {
                                     selected => { root.prefs-changed(); }
                                 }
                             }
-                            SettingRow {
-                                divider: true;
-                                label: @tr("Language");
-                                detail: @tr("Some text changes once you leave this screen.");
-                                ComboBox {
-                                    width: 160px;
-                                    model: root.languages;
-                                    current-index <=> root.language;
-                                    selected => { root.prefs-changed(); }
-                                }
-                            }
                         }
                         Panel {
                             SettingRow {
                                 label: @tr("Check for updates");
-                                detail: @tr("Once a day, RomP asks GitHub for its newest version, and tells you when there is one.");
+                                detail: @tr("Once a day, Romlin asks GitHub for its newest version, and tells you when there is one.");
                                 Switch { checked <=> root.check-updates; toggled => { root.prefs-changed(); } }
-                            }
-                        }
-                        Row {
-                            alignment: start;
-                            LinkButton {
-                                text: @tr("Help translate RomP on Crowdin");
-                                clicked => { root.open-link(Brand.translate-website); }
                             }
                         }
                     }
@@ -2152,7 +2131,7 @@ component SettingsPage inherits FocusScope {
                         Panel {
                             if root.ra-signed-in: SettingRow {
                                 label: @tr("Signed in as {}", root.ra-user);
-                                detail: @tr("Games with achievements show them as you play. RomP keeps a sign-in token, not your password.");
+                                detail: @tr("Games with achievements show them as you play. Romlin keeps a sign-in token, not your password.");
                                 Button { text: @tr("Sign out"); clicked => { root.ra-sign-out(); } }
                             }
                             if root.ra-signed-in && root.ra-hardcore-allowed: SettingRow {
@@ -2185,7 +2164,7 @@ component SettingsPage inherits FocusScope {
                             }
                             if !root.ra-signed-in: SettingRow {
                                 label: @tr("Sign in");
-                                detail: root.ra-status != "" ? root.ra-status : @tr("Earn achievements while you play. RomP keeps a sign-in token, not your password.");
+                                detail: root.ra-status != "" ? root.ra-status : @tr("Earn achievements while you play. Romlin keeps a sign-in token, not your password.");
                                 detail-color: root.ra-status != "" && !root.ra-busy ? Theme.danger : Theme.text-muted;
                                 LineEdit {
                                     width: 150px;
@@ -2617,7 +2596,7 @@ component AboutDialog inherits Rectangle {
                 Text { horizontal-alignment: Locale.start;
                     x: 24px;
                     width: parent.width - 48px;
-                    text: @tr("RomP and the emulators it downloads are each covered by their own license.");
+                    text: @tr("Romlin and the emulators it downloads are each covered by their own license.");
                     font-size: Theme.font-small;
                     color: Theme.text-muted;
                     wrap: word-wrap;
@@ -2755,8 +2734,6 @@ export component AppWindow inherits Window {
     in property <[string]> pref-popup-levels;
     in property <[string]> pref-popup-corners;
     in-out property <int> pref-ui-scale;
-    in property <[string]> pref-languages;
-    in-out property <int> pref-language;
     callback prefs-changed();
     in-out property <bool> pref-nintendo-labels;
     in-out property <bool> pref-stick-dpad;
@@ -3135,8 +3112,6 @@ export component AppWindow inherits Window {
             accept-installs <=> root.pref-accept-installs;
             volume <=> root.pref-volume;
             ui-scale <=> root.pref-ui-scale;
-            languages: root.pref-languages;
-            language <=> root.pref-language;
             prefs-changed => { root.prefs-changed(); }
             nintendo-labels <=> root.pref-nintendo-labels;
             stick-dpad <=> root.pref-stick-dpad;

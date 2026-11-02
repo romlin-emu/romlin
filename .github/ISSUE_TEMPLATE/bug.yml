@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in RomP doesn't work as it should.
+description: Something in Romlin doesn't work as it should.
 labels: ["bug"]
 body:
   - type: markdown
@@ -26,7 +26,7 @@ body:
     id: what
     attributes:
       label: What happened?
-      description: What you did, what RomP did, and what you expected instead.
+      description: What you did, what Romlin did, and what you expected instead.
     validations:
       required: true
   - type: textarea
@@ -40,15 +40,15 @@ body:
   - type: input
     id: version
     attributes:
-      label: RomP version
-      description: "Shown in About RomP: Help → About RomP, or the ⓘ button."
+      label: Romlin version
+      description: "Shown in About Romlin: Help → About Romlin, or the ⓘ button."
       placeholder: "0.18.1"
     validations:
       required: true
   - type: dropdown
     id: install
     attributes:
-      label: How you installed RomP
+      label: How you installed Romlin
       options:
         - Download from the releases page
         - Homebrew
@@ -77,7 +77,7 @@ body:
     attributes:
       label: Log
       description: |
-        In RomP, open **About RomP → Show log**, and drag the whole `romp.log` here. If RomP has been restarted since the problem, the earlier launches are `romp.1.log`, `romp.2.log` and so on.
+        In Romlin, open **About Romlin → Show log**, and drag the whole `romlin.log` here. If Romlin has been restarted since the problem, the earlier launches are `romlin.1.log`, `romlin.2.log` and so on.
         The log can include your server's address, game names and folder paths. Look it over first if that matters to you. It never includes your passwords or sign-in tokens.
   - type: textarea
     id: more

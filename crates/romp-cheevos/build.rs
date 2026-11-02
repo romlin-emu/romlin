@@ -20,7 +20,7 @@ fn main() {
     files.sort();
     cc::Build::new()
         .files(&files)
-        .file("shim/romp_cheevos.c")
+        .file("shim/romlin_cheevos.c")
         .include("rcheevos/include")
         .include("rcheevos/src")
         .include("libretro")

@@ -153,11 +153,11 @@ fn tightened_file_read(p: &SandboxParams<'_>) -> String {
 }
 
 #[cfg(target_os = "macos")]
-const WILDCARD_FILE_READ: &str = "; ROMP_SANDBOX_PERMISSIVE_READ\n(allow file-read*)";
+const WILDCARD_FILE_READ: &str = "; ROMLIN_SANDBOX_PERMISSIVE_READ\n(allow file-read*)";
 
 #[cfg(target_os = "macos")]
 const WILDCARD_MACH_LOOKUP: &str =
-    "; ROMP_SANDBOX_PERMISSIVE_MACH\n(allow mach-lookup)\n(allow mach-task-name)";
+    "; ROMLIN_SANDBOX_PERMISSIVE_MACH\n(allow mach-lookup)\n(allow mach-task-name)";
 
 #[cfg(target_os = "macos")]
 const TIGHTENED_MACH_LOOKUP: &str = r##"(allow mach-lookup
@@ -216,14 +216,14 @@ mod tests {
 
     fn with_profile(permissive_mach: bool, permissive_read: bool, jit: bool, rom: &str) -> String {
         let core = Path::new(
-            "/Users/t/Library/Application Support/Romp/cores/snes9x/snes9x_libretro.dylib",
+            "/Users/t/Library/Application Support/Romlin/cores/snes9x/snes9x_libretro.dylib",
         );
-        let system = Path::new("/Users/t/Library/Application Support/Romp/system");
-        let save = Path::new("/Users/t/Library/Application Support/Romp/saves/42");
+        let system = Path::new("/Users/t/Library/Application Support/Romlin/system");
+        let save = Path::new("/Users/t/Library/Application Support/Romlin/saves/42");
         build_profile(&SandboxParams {
             rom_path: Path::new(rom),
             core_path: core,
-            socket_path: Path::new("/tmp/romp-1.sock"),
+            socket_path: Path::new("/tmp/romlin-1.sock"),
             system_dir: system,
             save_dir: save,
             home_dir: Path::new("/Users/t"),
@@ -244,8 +244,8 @@ mod tests {
         assert!(p.contains("(deny default)"));
         assert!(p.contains("\"/Users/t/roms/game.smc\""));
         assert!(p.contains("snes9x_libretro.dylib"));
-        assert!(p.contains("Romp/system\""));
-        assert!(p.contains("Romp/saves/42\""));
+        assert!(p.contains("Romlin/system\""));
+        assert!(p.contains("Romlin/saves/42\""));
     }
 
     #[test]
@@ -254,7 +254,7 @@ mod tests {
         let writes = &p[p.find("(allow file-write*").unwrap()..];
         let writes = &writes[..writes.find("))").unwrap()];
         assert!(writes.contains("saves/42"));
-        assert!(!writes.contains("Romp/system"));
+        assert!(!writes.contains("Romlin/system"));
         assert!(!writes.contains("cores"));
     }
 
@@ -262,14 +262,14 @@ mod tests {
     fn tightened_mach_lookup_is_named_and_permissive_is_wildcard() {
         assert!(profile().contains("com.apple.audio.coreaudiod"));
         let permissive = with_profile(true, false, false, "/r/g.smc");
-        assert!(permissive.contains("ROMP_SANDBOX_PERMISSIVE_MACH"));
+        assert!(permissive.contains("ROMLIN_SANDBOX_PERMISSIVE_MACH"));
         assert!(!permissive.contains("com.apple.audio.coreaudiod"));
     }
 
     #[test]
     fn permissive_read_is_wildcard() {
         let p = with_profile(false, true, false, "/r/g.smc");
-        assert!(p.contains("ROMP_SANDBOX_PERMISSIVE_READ"));
+        assert!(p.contains("ROMLIN_SANDBOX_PERMISSIVE_READ"));
         assert!(!p.contains("/dev/urandom"));
     }
 

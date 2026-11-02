@@ -3,7 +3,7 @@ use crate::achievements::{self, popups::Launch, Account};
 use crate::credentials::{Keychain, TokenStore};
 use crate::store::GameDetail;
 use crate::AchievementRow;
-use romp_proto::msg::AchievementInfo;
+use romlin_proto::msg::AchievementInfo;
 use slint::{ModelRc, VecModel};
 
 const USER_KEY: &str = "ra_username";

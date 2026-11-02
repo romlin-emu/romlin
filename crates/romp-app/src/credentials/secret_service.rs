@@ -25,7 +25,7 @@ pub(super) fn prepare() -> anyhow::Result<()> {
         .args([
             "--user",
             "--collect",
-            "--unit=romp-keyring",
+            "--unit=romlin-keyring",
             "--property=Type=dbus",
             "--property=BusName=org.freedesktop.secrets",
             "--property=TimeoutStartSec=10s",
@@ -52,7 +52,7 @@ mod tests {
 
     #[test]
     fn game_mode_prepares_a_missing_provider_and_preserves_an_existing_one() {
-        const CHILD: &str = "ROMP_TEST_SECRET_SERVICE";
+        const CHILD: &str = "ROMLIN_TEST_SECRET_SERVICE";
         if let Ok(mode) = std::env::var(CHILD) {
             tracing_subscriber::fmt()
                 .without_time()
@@ -69,11 +69,11 @@ mod tests {
         for (name, body) in [
             (
                 "busctl",
-                "printf 'probe\\n' >> \"$ROMP_TEST_CALLS\"\ntest -f \"$ROMP_TEST_READY\"",
+                "printf 'probe\\n' >> \"$ROMLIN_TEST_CALLS\"\ntest -f \"$ROMLIN_TEST_READY\"",
             ),
             (
                 "systemd-run",
-                "printf '%s\\n' \"$@\" >> \"$ROMP_TEST_CALLS\"\ncase \"$ROMP_TEST_SECRET_SERVICE\" in\nfailed) printf 'provider startup failed\\n' >&2; exit 1;;\nrace) touch \"$ROMP_TEST_READY\"; exit 1;;\n*) touch \"$ROMP_TEST_READY\";;\nesac",
+                "printf '%s\\n' \"$@\" >> \"$ROMLIN_TEST_CALLS\"\ncase \"$ROMLIN_TEST_SECRET_SERVICE\" in\nfailed) printf 'provider startup failed\\n' >&2; exit 1;;\nrace) touch \"$ROMLIN_TEST_READY\"; exit 1;;\n*) touch \"$ROMLIN_TEST_READY\";;\nesac",
             ),
         ] {
             let path = dir.path().join(name);
@@ -98,8 +98,8 @@ mod tests {
                 ])
                 .env(CHILD, mode)
                 .env("PATH", &path)
-                .env("ROMP_TEST_READY", &ready)
-                .env("ROMP_TEST_CALLS", &calls)
+                .env("ROMLIN_TEST_READY", &ready)
+                .env("ROMLIN_TEST_CALLS", &calls)
                 .output()
                 .unwrap();
             let log = String::from_utf8_lossy(&output.stderr);

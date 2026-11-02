@@ -95,7 +95,7 @@ pub fn open_rom(
     })
 }
 
-/// Whether the core lists this file's type. Cores that list none take anything, and RomP's own
+/// Whether the core lists this file's type. Cores that list none take anything, and Romlin's own
 /// .m3u playlists go to cores whether or not they mention them.
 pub fn plays(valid_extensions: &str, path: &Path) -> bool {
     let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
@@ -653,7 +653,7 @@ fn parse_gdi_referenced_files(gdi_bytes: &[u8]) -> Vec<String> {
 }
 
 pub fn scratch_dir(session_id: &str) -> PathBuf {
-    std::env::temp_dir().join(format!("romp-rom-{session_id}"))
+    std::env::temp_dir().join(format!("romlin-rom-{session_id}"))
 }
 
 pub fn remove_stale_scratch(tmp: &Path) {
@@ -664,7 +664,7 @@ pub fn remove_stale_scratch(tmp: &Path) {
         let name = entry.file_name();
         let Some(pid) = name
             .to_str()
-            .and_then(|n| n.strip_prefix("romp-rom-"))
+            .and_then(|n| n.strip_prefix("romlin-rom-"))
             .and_then(|p| p.parse::<u32>().ok())
         else {
             continue;
@@ -725,8 +725,10 @@ mod tests {
     #[test]
     fn stale_scratch_dirs_of_dead_runners_are_removed() {
         let tmp = tempfile::tempdir().unwrap();
-        let live = tmp.path().join(format!("romp-rom-{}", std::process::id()));
-        let dead = tmp.path().join("romp-rom-2147483000");
+        let live = tmp
+            .path()
+            .join(format!("romlin-rom-{}", std::process::id()));
+        let dead = tmp.path().join("romlin-rom-2147483000");
         let other = tmp.path().join("unrelated");
         for dir in [&live, &dead, &other] {
             std::fs::create_dir_all(dir.join("disc")).unwrap();
@@ -827,7 +829,7 @@ mod tests {
     }
 
     #[test]
-    fn a_core_plays_the_files_it_lists_and_romps_own_playlists() {
+    fn a_core_plays_the_files_it_lists_and_romlins_own_playlists() {
         let jaguar = "j64|jag|rom|abs|cof|bin|prg|cue|cdi|chd";
         assert!(plays(jaguar, Path::new("/g/Game.CUE")));
         assert!(!plays(jaguar, Path::new("/g/Battle Morph.bigpimg")));

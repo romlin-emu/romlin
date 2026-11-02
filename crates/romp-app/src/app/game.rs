@@ -388,7 +388,7 @@ impl Controller {
         self.refresh_collection_controls(detail.id);
         ui.set_game_can_download(!self.offline.get() && self.downloading_id().is_none());
         if !playable {
-            ui.set_game_status(tr!("RomP can't play {} games yet.", detail.platform).into());
+            ui.set_game_status(tr!("Romlin can't play {} games yet.", detail.platform).into());
         } else if self.downloading_id().is_some_and(|d| d != detail.id) {
             ui.set_game_status(tr!("Another download is in progress.").into());
         } else if self.offline.get() && downloaded_path(&detail).is_none() {
@@ -1094,7 +1094,7 @@ impl Controller {
             fullscreen: prefs.fullscreen,
             volume: prefs.volume,
         });
-        let config_path = home.0.join("romp.yml");
+        let config_path = home.0.join("romlin.yml");
         let written = std::fs::create_dir_all(&home.0)
             .and_then(|()| std::fs::write(&config_path, config))
             .and_then(|()| home.write_input(&input));

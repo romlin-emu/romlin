@@ -1,7 +1,7 @@
 use crate::input;
 use crate::mapping::{self, Mappings, BUTTONS};
 use crate::pad_labels::Family;
-use romp_proto::msg::PadState;
+use romlin_proto::msg::PadState;
 use sdl3::event::Event;
 use sdl3::gamepad::{Axis, Button as SdlButton, GamepadType};
 use sdl3::joystick::JoystickId;

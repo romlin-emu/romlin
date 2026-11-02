@@ -1,13 +1,13 @@
 use anyhow::Context;
 use clap::Parser;
-use romp_libretro as lr;
-use romp_proto::frame::{self, FrameWriter, SrcFormat};
-use romp_proto::msg::{AppMsg, RunnerMsg};
-use romp_runner::achievements::Achievements;
-use romp_runner::frontend::Frontend;
-use romp_runner::ipc::Link;
-use romp_runner::state::{self, StateManager};
-use romp_runner::{archive, audio, hw_gl, hw_vulkan, perf, sandbox};
+use romlin_libretro as lr;
+use romlin_proto::frame::{self, FrameWriter, SrcFormat};
+use romlin_proto::msg::{AppMsg, RunnerMsg};
+use romlin_runner::achievements::Achievements;
+use romlin_runner::frontend::Frontend;
+use romlin_runner::ipc::Link;
+use romlin_runner::state::{self, StateManager};
+use romlin_runner::{archive, audio, hw_gl, hw_vulkan, perf, sandbox};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
@@ -17,7 +17,7 @@ const UNLOAD_GRACE: Duration = Duration::from_secs(2);
 const RESUME_WAIT: Duration = Duration::from_secs(10);
 
 #[derive(Parser)]
-#[command(name = "romp-runner")]
+#[command(name = "romlin-runner")]
 struct Args {
     #[arg(long)]
     core: PathBuf,
@@ -93,7 +93,7 @@ fn main() -> anyhow::Result<()> {
     }
     // A core's fault filter passes on the faults it doesn't claim, to whatever came before it.
     #[cfg(target_os = "linux")]
-    romp_runner::crash::install();
+    romlin_runner::crash::install();
     let args = Args::parse();
     lr::set_core_log_min(core_log_min(std::env::var("RUST_LOG").ok().as_deref()));
     #[cfg(windows)]
@@ -116,7 +116,7 @@ fn main() -> anyhow::Result<()> {
     })));
     let audio = frontend.audio.clone();
     lr::set_audio_sink(Some(std::sync::Arc::new(move |samples: &[i16]| {
-        romp_runner::audio_pipe::push(&audio, samples)
+        romlin_runner::audio_pipe::push(&audio, samples)
     })));
     let link = Link::connect(&args.socket, frontend.input.clone()).context("connect to app")?;
     let result = run(&args, &mut frontend, &link);
@@ -161,7 +161,7 @@ fn run(args: &Args, frontend: &mut Frontend, link: &Link) -> anyhow::Result<()> 
     archive::remove_stale_scratch(&std::env::temp_dir());
     apply_sandbox(args, vulkan_library.as_deref())?;
 
-    lr::set_memory_map_hook(Some(|map| unsafe { romp_cheevos::set_memory_map(map) }));
+    lr::set_memory_map_hook(Some(|map| unsafe { romlin_cheevos::set_memory_map(map) }));
     let mut core = unsafe { lr::Core::load(&args.core) }.context("load core")?;
     lr::set_core_option_values(&args.options);
     let sys = core.system_info();
@@ -219,7 +219,7 @@ fn run(args: &Args, frontend: &mut Frontend, link: &Link) -> anyhow::Result<()> 
         core.set_controller_port_device(port, lr::RETRO_DEVICE_JOYPAD, frontend);
     }
     let (memory_data, memory_size) = core.memory_functions();
-    romp_cheevos::set_core_memory(memory_data, memory_size);
+    romlin_cheevos::set_core_memory(memory_data, memory_size);
     let mut achievements: Option<Achievements> = None;
 
     let mut saves = StateManager::new(&args.save_dir);
@@ -548,8 +548,8 @@ fn core_home(save_dir: &std::path::Path) -> PathBuf {
 }
 
 fn apply_sandbox(args: &Args, vulkan_library: Option<&std::path::Path>) -> anyhow::Result<()> {
-    if std::env::var_os("ROMP_NO_SANDBOX").is_some() {
-        warn!("sandbox disabled by ROMP_NO_SANDBOX");
+    if std::env::var_os("ROMLIN_NO_SANDBOX").is_some() {
+        warn!("sandbox disabled by ROMLIN_NO_SANDBOX");
         return Ok(());
     }
     let canon = |p: &PathBuf| dunce::canonicalize(p).unwrap_or_else(|_| p.clone());
@@ -565,8 +565,8 @@ fn apply_sandbox(args: &Args, vulkan_library: Option<&std::path::Path>) -> anyho
         home_dir: &home,
         vulkan_library,
         needs_jit: args.jit,
-        permissive_mach: std::env::var_os("ROMP_SANDBOX_PERMISSIVE_MACH").is_some(),
-        permissive_read: std::env::var_os("ROMP_SANDBOX_PERMISSIVE_READ").is_some(),
+        permissive_mach: std::env::var_os("ROMLIN_SANDBOX_PERMISSIVE_MACH").is_some(),
+        permissive_read: std::env::var_os("ROMLIN_SANDBOX_PERMISSIVE_READ").is_some(),
     })
 }
 
@@ -578,9 +578,9 @@ mod tests {
     fn emulator_debug_messages_are_left_out_unless_asked_for() {
         assert_eq!(core_log_min(None), 1);
         assert_eq!(core_log_min(Some("info")), 1);
-        assert_eq!(core_log_min(Some("romp=warn")), 1);
+        assert_eq!(core_log_min(Some("romlin=warn")), 1);
         assert_eq!(core_log_min(Some("debug")), 0);
-        assert_eq!(core_log_min(Some("info,romp_runner=TRACE")), 0);
+        assert_eq!(core_log_min(Some("info,romlin_runner=TRACE")), 0);
     }
 
     #[test]

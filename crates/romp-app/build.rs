@@ -2,10 +2,8 @@ fn main() {
     build_revision();
     let config = slint_build::CompilerConfiguration::new()
         .with_style("fluent-dark".into())
-        .with_bundled_translations("translations")
         .with_default_translation_context(slint_build::DefaultTranslationContext::None);
     slint_build::compile_with_config("ui/main.slint", config).expect("compile slint ui");
-    println!("cargo:rerun-if-changed=translations");
     #[cfg(windows)]
     winresource::WindowsResource::new()
         .set_icon("assets/icon.ico")
@@ -36,5 +34,5 @@ fn build_revision() {
         }
     }
     let revision = git(&["rev-parse", "HEAD"]).unwrap_or_else(|| "unknown".into());
-    println!("cargo:rustc-env=ROMP_BUILD_REVISION={revision}");
+    println!("cargo:rustc-env=ROMLIN_BUILD_REVISION={revision}");
 }

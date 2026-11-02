@@ -1,4 +1,4 @@
-//! RomM 5.4's `/devices` Socket.IO namespace: how RomP hears about games sent to it the moment
+//! RomM 5.4's `/devices` Socket.IO namespace: how Romlin hears about games sent to it the moment
 //! they're sent.
 use super::socketio::{self, Frame};
 use futures_util::{SinkExt, StreamExt};
@@ -162,7 +162,7 @@ async fn run(
     Ended::Dropped
 }
 
-/// Checks certificates the way reqwest does for RomP's other requests.
+/// Checks certificates the way reqwest does for Romlin's other requests.
 fn tls_config() -> rustls::ClientConfig {
     use rustls_platform_verifier::ConfigVerifierExt;
     rustls::ClientConfig::with_platform_verifier().expect("platform certificate verifier")

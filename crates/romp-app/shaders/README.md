@@ -6,4 +6,6 @@ and the handheld colour shaders by hunterk and Pokefan531 are public domain.
 mdapt by Sp00kyFox and the colour lookup passes state no license of their own and
 are distributed here as part of that collection.
 
-Only the files the presets Romp offers need are copied here, unchanged.
+Only the files the presets Romlin offers need are copied here, unchanged.
+
+Romlin is derived from [RomP](https://github.com/RompEmu/RomP) by Beshr Kayali Reinholdsson; upstream shader authors and license notices are preserved.

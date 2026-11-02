@@ -30,8 +30,8 @@ def desktop_args(command):
 
 class InstallerTests(unittest.TestCase):
     def run_install(self, home, corrupt=False, add=True, existing=False):
-        name = 'RomP-nightly-x86_64.AppImage'
-        url = 'https://github.com/aaronflorey/RomP/releases/download/nightly/'
+        name = 'Romlin-nightly-x86_64.AppImage'
+        url = 'https://github.com/romlin-emu/romlin/releases/download/nightly/'
         release = {'assets': [{'name': n, 'browser_download_url': url + n}
                               for n in (name, name + '.sha512')]}
         payload = b'appimage fixture'
@@ -60,22 +60,22 @@ class InstallerTests(unittest.TestCase):
 
             install.install()
             if add or existing:
-                artwork.assert_called_once_with(home / "Applications/RomP")
+                artwork.assert_called_once_with(home / "Applications/Romlin")
             else:
                 artwork.assert_not_called()
             fetch.assert_called_once()
             self.assertEqual(fetch.call_args.args[0].full_url,
-                             'https://api.github.com/repos/aaronflorey/RomP/releases/tags/nightly')
+                             'https://api.github.com/repos/romlin-emu/romlin/releases/tags/nightly')
             return calls
 
     def test_install_and_update_without_duplicate(self):
         with tempfile.TemporaryDirectory() as temp:
             home = Path(temp) / 'home with spaces'
             calls = self.run_install(home)
-            image = home / 'Applications/RomP/RomP.AppImage'
+            image = home / 'Applications/Romlin/Romlin.AppImage'
             self.assertEqual(image.read_bytes(), b'appimage fixture')
             self.assertTrue(image.stat().st_mode & 0o111)
-            launcher = home / 'data/applications/io.github.rompemu.romp.desktop'
+            launcher = home / 'data/applications/io.github.romlinemu.romlin.desktop'
             self.assertIn('--appimage-extract-and-run', launcher.read_text())
             helper_calls = [c.args[0] for c in calls.call_args_list
                             if c.args[0][0] == '/usr/bin/steamos-add-to-steam']
@@ -92,7 +92,7 @@ class InstallerTests(unittest.TestCase):
     def test_checksum_failure_preserves_old_app(self):
         with tempfile.TemporaryDirectory() as temp:
             home = Path(temp)
-            image = home / 'Applications/RomP/RomP.AppImage'
+            image = home / 'Applications/Romlin/Romlin.AppImage'
             image.parent.mkdir(parents=True)
             image.write_bytes(b'old app')
             with self.assertRaisesRegex(RuntimeError, 'checksum'):
@@ -109,9 +109,9 @@ class InstallerTests(unittest.TestCase):
                 install.download(url, Path('/unused'))
 
     def test_desktop_quoting_and_bootstrap_syntax(self):
-        value = '/home/a b/$`"\\/RomP.AppImage'
+        value = '/home/a b/$`"\\/Romlin.AppImage'
         self.assertEqual(desktop_args(install.desktop_quote(value)), [value])
-        desktop = Path(__file__).with_name('Install-RomP.desktop').read_text()
+        desktop = Path(__file__).with_name('Install-Romlin.desktop').read_text()
         command = next(line[5:] for line in desktop.splitlines() if line.startswith('Exec='))
         args = desktop_args(command)
         self.assertEqual(args[:2], ['bash', '-c'])
@@ -123,17 +123,17 @@ class ArtworkTests(unittest.TestCase):
         def text(key, value):
             return b'\x01' + key.encode() + b'\0' + value.encode() + b'\0'
         return (b'\x00shortcuts\0\x000\0\x02appid\0' + appid.to_bytes(4, 'little')
-                + text('AppName', 'RomP') + text('Exe', executable)
+                + text('AppName', 'Romlin') + text('Exe', executable)
                 + b'\x00tags\0\x08\x08\x08\x08')
 
     def test_artwork_matches_saved_shortcut_and_refreshes_art(self):
         with tempfile.TemporaryDirectory() as temp:
             home = Path(temp)
-            folder = home / 'Applications/RomP'
+            folder = home / 'Applications/Romlin'
             folder.mkdir(parents=True)
             config = home / '.local/share/Steam/userdata/123/config'
             config.mkdir(parents=True)
-            database = self.fixture('"' + str(folder / 'RomP.AppImage') + '"')
+            database = self.fixture('"' + str(folder / 'Romlin.AppImage') + '"')
             (config / 'shortcuts.vdf').write_bytes(database)
             grid = config / 'grid'
             grid.mkdir()

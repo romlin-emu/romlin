@@ -465,7 +465,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn live_server_sync() {
-        let Some(path) = std::env::var_os("ROMP_LIVE") else {
+        let Some(path) = std::env::var_os("ROMLIN_LIVE") else {
             return;
         };
         let cfg: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();

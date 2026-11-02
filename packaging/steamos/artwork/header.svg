@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="430" viewBox="0 0 920 430"><rect width="920" height="430" fill="#0b1729"/><text x="70" y="210.7" fill="#f5f7f3" font-family="DejaVu Sans,Arial,sans-serif" font-size="105" font-weight="bold">Romlin</text><text x="75" y="283.8" fill="#62e1cf" font-family="DejaVu Sans,Arial,sans-serif" font-size="21">Your library. Ready to play.</text><g transform="translate(531.0 43.0) scale(0.3359375)">
+<rect width="1024" height="1024" rx="224" fill="#102b39"/>
+<path d="M278 224h468l70 70v506H208V294z" fill="#112936" stroke="#62e1cf" stroke-width="28" stroke-linejoin="round"/>
+<path d="M336 224h352v116H336z" fill="#52d5c7"/>
+<path d="M352 442h184c100 0 150 47 150 123 0 53-29 91-77 109l100 126H589L456 624h71c40 0 62-18 62-51s-22-51-62-51h-71v278H352z" fill="#f5f7f3"/>
+<path d="m682 430 96 58-96 58z" fill="#ffa66f"/>
+<path d="M305 856h414" stroke="#52d5c7" stroke-width="20" stroke-linecap="round"/>
+</g></svg>

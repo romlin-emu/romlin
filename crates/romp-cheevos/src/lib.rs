@@ -1,6 +1,6 @@
 //! RetroAchievements through rcheevos' rc_client, with its network requests handed to the caller.
 
-use romp_proto::msg::{AchievementEvent, AchievementInfo};
+use romlin_proto::msg::{AchievementEvent, AchievementInfo};
 use std::collections::HashMap;
 use std::ffi::{c_char, c_int, c_uint, c_void, CStr, CString};
 use std::path::Path;
@@ -39,29 +39,33 @@ pub type MemoryData = unsafe extern "C" fn(c_uint) -> *mut c_void;
 pub type MemorySize = unsafe extern "C" fn(c_uint) -> usize;
 
 unsafe extern "C" {
-    fn romp_rc_create(host: *mut c_void, hardcore: c_int) -> *mut c_void;
-    fn romp_rc_destroy(client: *mut c_void);
-    fn romp_rc_login(client: *mut c_void, username: *const c_char, token: *const c_char);
-    fn romp_rc_load_game(
+    fn romlin_rc_create(host: *mut c_void, hardcore: c_int) -> *mut c_void;
+    fn romlin_rc_destroy(client: *mut c_void);
+    fn romlin_rc_login(client: *mut c_void, username: *const c_char, token: *const c_char);
+    fn romlin_rc_load_game(
         client: *mut c_void,
         console_id: u32,
         path: *const c_char,
         data: *const u8,
         size: usize,
     );
-    fn romp_rc_load_hash(client: *mut c_void, hash: *const c_char);
-    fn romp_rc_respond(
+    fn romlin_rc_load_hash(client: *mut c_void, hash: *const c_char);
+    fn romlin_rc_respond(
         callback: *const c_void,
         callback_data: *mut c_void,
         body: *const c_char,
         body_length: usize,
         status: c_int,
     );
-    fn romp_rc_game(client: *mut c_void, title: *mut *const c_char, achievements: *mut u32) -> u32;
-    fn romp_rc_user_agent_clause(client: *mut c_void, buffer: *mut c_char, size: usize) -> usize;
-    fn romp_rc_set_memory_map(map: *const c_void);
-    fn romp_rc_set_core_memory(data: Option<MemoryData>, size: Option<MemorySize>);
-    fn romp_rc_catalog_request(
+    fn romlin_rc_game(
+        client: *mut c_void,
+        title: *mut *const c_char,
+        achievements: *mut u32,
+    ) -> u32;
+    fn romlin_rc_user_agent_clause(client: *mut c_void, buffer: *mut c_char, size: usize) -> usize;
+    fn romlin_rc_set_memory_map(map: *const c_void);
+    fn romlin_rc_set_core_memory(data: Option<MemoryData>, size: Option<MemorySize>);
+    fn romlin_rc_catalog_request(
         username: *const c_char,
         token: *const c_char,
         game_id: u32,
@@ -69,7 +73,7 @@ unsafe extern "C" {
         ctx: *mut c_void,
         out: RequestOut,
     ) -> c_int;
-    fn romp_rc_unlocks_request(
+    fn romlin_rc_unlocks_request(
         username: *const c_char,
         token: *const c_char,
         game_id: u32,
@@ -77,34 +81,35 @@ unsafe extern "C" {
         ctx: *mut c_void,
         out: RequestOut,
     ) -> c_int;
-    fn romp_rc_parse_catalog(
+    fn romlin_rc_parse_catalog(
         body: *const c_char,
         length: usize,
         status: c_int,
         ctx: *mut c_void,
         out: AchievementOut,
     ) -> u32;
-    fn romp_rc_parse_unlocks(
+    fn romlin_rc_parse_unlocks(
         body: *const c_char,
         length: usize,
         status: c_int,
         ctx: *mut c_void,
         out: IdOut,
     ) -> c_int;
-    fn romp_rc_list_achievements(client: *mut c_void, ctx: *mut c_void, out: AchievementOut);
-    fn romp_rc_hardcore(client: *mut c_void) -> c_int;
-    fn romp_rc_set_hardcore(client: *mut c_void, enabled: c_int);
-    fn romp_rc_console(client: *mut c_void) -> u32;
-    fn romp_rc_progress_size(client: *mut c_void) -> usize;
-    fn romp_rc_serialize_progress(client: *mut c_void, buffer: *mut u8, size: usize) -> c_int;
-    fn romp_rc_deserialize_progress(client: *mut c_void, buffer: *const u8, size: usize) -> c_int;
-    fn romp_rc_setting_allowed(
+    fn romlin_rc_list_achievements(client: *mut c_void, ctx: *mut c_void, out: AchievementOut);
+    fn romlin_rc_hardcore(client: *mut c_void) -> c_int;
+    fn romlin_rc_set_hardcore(client: *mut c_void, enabled: c_int);
+    fn romlin_rc_console(client: *mut c_void) -> u32;
+    fn romlin_rc_progress_size(client: *mut c_void) -> usize;
+    fn romlin_rc_serialize_progress(client: *mut c_void, buffer: *mut u8, size: usize) -> c_int;
+    fn romlin_rc_deserialize_progress(client: *mut c_void, buffer: *const u8, size: usize)
+        -> c_int;
+    fn romlin_rc_setting_allowed(
         library_name: *const c_char,
         key: *const c_char,
         value: *const c_char,
     ) -> c_int;
-    fn romp_rc_system_allowed(library_name: *const c_char, console_id: u32) -> c_int;
-    fn romp_rc_award_request(
+    fn romlin_rc_system_allowed(library_name: *const c_char, console_id: u32) -> c_int;
+    fn romlin_rc_award_request(
         username: *const c_char,
         token: *const c_char,
         achievement_id: u32,
@@ -114,7 +119,7 @@ unsafe extern "C" {
         ctx: *mut c_void,
         out: RequestOut,
     ) -> c_int;
-    fn romp_rc_award_accepted(body: *const c_char, length: usize, status: c_int) -> c_int;
+    fn romlin_rc_award_accepted(body: *const c_char, length: usize, status: c_int) -> c_int;
     fn rc_client_do_frame(client: *mut c_void);
     fn rc_client_idle(client: *mut c_void);
     fn rc_client_reset(client: *mut c_void);
@@ -125,12 +130,12 @@ unsafe extern "C" {
 /// # Safety
 /// `map` is null or points to a valid `retro_memory_map` for the duration of the call.
 pub unsafe fn set_memory_map(map: *const c_void) {
-    unsafe { romp_rc_set_memory_map(map) }
+    unsafe { romlin_rc_set_memory_map(map) }
 }
 
 /// The core's `retro_get_memory_data` and `retro_get_memory_size`, used when it has no memory map.
 pub fn set_core_memory(data: MemoryData, size: MemorySize) {
-    unsafe { romp_rc_set_core_memory(Some(data), Some(size)) }
+    unsafe { romlin_rc_set_core_memory(Some(data), Some(size)) }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -171,7 +176,7 @@ fn host<'a>(ptr: *mut c_void) -> &'a mut Host {
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn romp_rc_on_request(
+extern "C" fn romlin_rc_on_request(
     host_ptr: *mut c_void,
     url: *const c_char,
     post: *const c_char,
@@ -199,7 +204,7 @@ extern "C" fn romp_rc_on_request(
 }
 
 #[unsafe(no_mangle)]
-extern "C" fn romp_rc_on_event(host_ptr: *mut c_void, event: *const RawEvent) {
+extern "C" fn romlin_rc_on_event(host_ptr: *mut c_void, event: *const RawEvent) {
     // SAFETY: the shim passes a pointer to an event on its stack for the length of the call.
     let e = unsafe { &*event };
     let event = match e.kind {
@@ -250,7 +255,7 @@ extern "C" fn romp_rc_on_event(host_ptr: *mut c_void, event: *const RawEvent) {
 const DONE_LOGIN: c_int = 0;
 
 #[unsafe(no_mangle)]
-extern "C" fn romp_rc_on_done(
+extern "C" fn romlin_rc_on_done(
     host_ptr: *mut c_void,
     what: c_int,
     result: c_int,
@@ -274,7 +279,7 @@ extern "C" fn romp_rc_on_done(
             let id = match host.client {
                 // SAFETY: the client is alive while it reports on itself.
                 Some(client) => unsafe {
-                    romp_rc_game(client.as_ptr(), &mut title, &mut achievements)
+                    romlin_rc_game(client.as_ptr(), &mut title, &mut achievements)
                 },
                 None => 0,
             };
@@ -344,7 +349,7 @@ pub fn catalog_request(
     let mut out: Option<Request> = None;
     let (username, token, hash) = (c(username), c(token), hash.map(c));
     unsafe {
-        romp_rc_catalog_request(
+        romlin_rc_catalog_request(
             username.as_ptr(),
             token.as_ptr(),
             game_id,
@@ -360,7 +365,7 @@ pub fn catalog_request(
 pub fn parse_catalog(status: i32, body: &[u8]) -> Option<(u32, Vec<AchievementInfo>)> {
     let mut list = Vec::new();
     let game_id = unsafe {
-        romp_rc_parse_catalog(
+        romlin_rc_parse_catalog(
             body.as_ptr().cast(),
             body.len(),
             status,
@@ -381,7 +386,7 @@ pub fn unlocks_request(
     let mut out: Option<Request> = None;
     let (username, token) = (c(username), c(token));
     unsafe {
-        romp_rc_unlocks_request(
+        romlin_rc_unlocks_request(
             username.as_ptr(),
             token.as_ptr(),
             game_id,
@@ -396,7 +401,7 @@ pub fn unlocks_request(
 pub fn parse_unlocks(status: i32, body: &[u8]) -> Option<Vec<u32>> {
     let mut ids = Vec::new();
     let result = unsafe {
-        romp_rc_parse_unlocks(
+        romlin_rc_parse_unlocks(
             body.as_ptr().cast(),
             body.len(),
             status,
@@ -447,7 +452,8 @@ pub fn award_outcome(status: i32, body: &[u8]) -> Award {
     if status <= 0 || status >= 500 || status == 429 {
         return Award::Retry;
     }
-    let accepted = unsafe { romp_rc_award_accepted(body.as_ptr().cast(), body.len(), status) != 0 };
+    let accepted =
+        unsafe { romlin_rc_award_accepted(body.as_ptr().cast(), body.len(), status) != 0 };
     if accepted {
         Award::Accepted
     } else {
@@ -465,7 +471,7 @@ pub fn award_request(
     let mut out: Option<Request> = None;
     let (username, token, hash) = (c(username), c(token), c(&unlock.hash));
     unsafe {
-        romp_rc_award_request(
+        romlin_rc_award_request(
             username.as_ptr(),
             token.as_ptr(),
             unlock.achievement_id,
@@ -482,13 +488,13 @@ pub fn award_request(
 /// Whether RetroAchievements allows a core setting while playing in hardcore.
 pub fn setting_allowed(core_library: &str, key: &str, value: &str) -> bool {
     let (core_library, key, value) = (c(core_library), c(key), c(value));
-    unsafe { romp_rc_setting_allowed(core_library.as_ptr(), key.as_ptr(), value.as_ptr()) != 0 }
+    unsafe { romlin_rc_setting_allowed(core_library.as_ptr(), key.as_ptr(), value.as_ptr()) != 0 }
 }
 
 /// Whether RetroAchievements allows this core for this console in hardcore.
 pub fn system_allowed(core_library: &str, console_id: u32) -> bool {
     let core_library = c(core_library);
-    unsafe { romp_rc_system_allowed(core_library.as_ptr(), console_id) != 0 }
+    unsafe { romlin_rc_system_allowed(core_library.as_ptr(), console_id) != 0 }
 }
 
 /// One player's achievement session for one game.
@@ -502,7 +508,7 @@ impl Session {
         let mut host = Box::<Host>::default();
         let host_ptr = std::ptr::from_mut(host.as_mut()).cast::<c_void>();
         // SAFETY: the boxed host outlives the client, which is destroyed in Drop.
-        let client = NonNull::new(unsafe { romp_rc_create(host_ptr, c_int::from(hardcore)) })?;
+        let client = NonNull::new(unsafe { romlin_rc_create(host_ptr, c_int::from(hardcore)) })?;
         host.client = Some(client);
         Some(Self { client, host })
     }
@@ -514,42 +520,42 @@ impl Session {
                 .events
                 .push(AchievementEvent::SignInFailed("invalid sign-in".into()));
         };
-        unsafe { romp_rc_login(self.client.as_ptr(), username.as_ptr(), token.as_ptr()) }
+        unsafe { romlin_rc_login(self.client.as_ptr(), username.as_ptr(), token.as_ptr()) }
     }
 
     /// Identifies the game from its file, or from its contents when the core loaded it into memory.
     pub fn load_game(&mut self, console_id: u32, path: &Path, data: Option<&[u8]>) {
         let path = CString::new(path.to_string_lossy().as_bytes()).unwrap_or_default();
         let (ptr, len) = data.map_or((std::ptr::null(), 0), |d| (d.as_ptr(), d.len()));
-        unsafe { romp_rc_load_game(self.client.as_ptr(), console_id, path.as_ptr(), ptr, len) }
+        unsafe { romlin_rc_load_game(self.client.as_ptr(), console_id, path.as_ptr(), ptr, len) }
     }
 
     /// Loads the game by the hash RetroAchievements knows it by, as RomM computes it.
     pub fn load_hash(&mut self, hash: &str) {
         let Ok(hash) = CString::new(hash) else { return };
-        unsafe { romp_rc_load_hash(self.client.as_ptr(), hash.as_ptr()) }
+        unsafe { romlin_rc_load_hash(self.client.as_ptr(), hash.as_ptr()) }
     }
 
     pub fn hardcore(&self) -> bool {
-        unsafe { romp_rc_hardcore(self.client.as_ptr()) != 0 }
+        unsafe { romlin_rc_hardcore(self.client.as_ptr()) != 0 }
     }
 
     pub fn set_hardcore(&mut self, enabled: bool) {
-        unsafe { romp_rc_set_hardcore(self.client.as_ptr(), c_int::from(enabled)) }
+        unsafe { romlin_rc_set_hardcore(self.client.as_ptr(), c_int::from(enabled)) }
     }
 
     /// RetroAchievements' number for the loaded game's console.
     pub fn console_id(&self) -> u32 {
-        unsafe { romp_rc_console(self.client.as_ptr()) }
+        unsafe { romlin_rc_console(self.client.as_ptr()) }
     }
 
     /// Where every achievement stands, to keep beside a save state.
     pub fn progress(&mut self) -> Vec<u8> {
-        let size = unsafe { romp_rc_progress_size(self.client.as_ptr()) };
+        let size = unsafe { romlin_rc_progress_size(self.client.as_ptr()) };
         let mut buffer = vec![0u8; size];
         let ok = size > 0
             && unsafe {
-                romp_rc_serialize_progress(self.client.as_ptr(), buffer.as_mut_ptr(), size)
+                romlin_rc_serialize_progress(self.client.as_ptr(), buffer.as_mut_ptr(), size)
             } == 0;
         if ok {
             buffer
@@ -561,14 +567,14 @@ impl Session {
     /// Puts achievements back where a save state left them; with no saved progress, they start over.
     pub fn restore_progress(&mut self, saved: Option<&[u8]>) {
         let (ptr, len) = saved.map_or((std::ptr::null(), 0), |s| (s.as_ptr(), s.len()));
-        unsafe { romp_rc_deserialize_progress(self.client.as_ptr(), ptr, len) };
+        unsafe { romlin_rc_deserialize_progress(self.client.as_ptr(), ptr, len) };
     }
 
     /// The game's achievements with what has been earned so far.
     pub fn achievements(&mut self) -> Vec<AchievementInfo> {
         let mut list = Vec::new();
         unsafe {
-            romp_rc_list_achievements(
+            romlin_rc_list_achievements(
                 self.client.as_ptr(),
                 std::ptr::from_mut(&mut list).cast(),
                 collect_achievement,
@@ -604,7 +610,7 @@ impl Session {
             return;
         };
         unsafe {
-            romp_rc_respond(
+            romlin_rc_respond(
                 pending.callback,
                 pending.data,
                 body.as_ptr().cast(),
@@ -618,7 +624,7 @@ impl Session {
     pub fn user_agent_clause(&mut self) -> String {
         let mut buffer = [0 as c_char; 64];
         let len = unsafe {
-            romp_rc_user_agent_clause(self.client.as_ptr(), buffer.as_mut_ptr(), buffer.len())
+            romlin_rc_user_agent_clause(self.client.as_ptr(), buffer.as_mut_ptr(), buffer.len())
         };
         let bytes: Vec<u8> = buffer[..len.min(buffer.len())]
             .iter()
@@ -630,7 +636,7 @@ impl Session {
 
 impl Drop for Session {
     fn drop(&mut self) {
-        unsafe { romp_rc_destroy(self.client.as_ptr()) }
+        unsafe { romlin_rc_destroy(self.client.as_ptr()) }
     }
 }
 

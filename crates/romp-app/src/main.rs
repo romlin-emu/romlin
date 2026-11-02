@@ -59,6 +59,7 @@ mod updates;
 mod vulkan;
 mod xemu;
 
+use anyhow::Context;
 use clap::Parser;
 use std::path::PathBuf;
 use tracing_subscriber::layer::SubscriberExt;
@@ -68,7 +69,7 @@ use tracing_subscriber::EnvFilter;
 slint::include_modules!();
 
 #[derive(Parser)]
-#[command(name = "romp")]
+#[command(name = "romlin")]
 struct Args {
     #[arg(long, requires = "rom")]
     core: Option<PathBuf>,
@@ -87,7 +88,7 @@ struct Args {
 fn main() -> anyhow::Result<()> {
     let result = run();
     if let Err(error) = &result {
-        tracing::error!(error = %format_args!("{error:#}"), "RomP failed");
+        tracing::error!(error = %format_args!("{error:#}"), "Romlin failed");
     }
     result
 }
@@ -95,7 +96,7 @@ fn main() -> anyhow::Result<()> {
 fn run() -> anyhow::Result<()> {
     // The old data folder only moves into a data folder that isn't there yet, so the log
     // folder inside it comes after.
-    let adopted = paths::adopt_legacy_data(&paths::data_dir());
+    paths::adopt_legacy_data(&paths::data_dir()).context("moving the old data folder")?;
     let (log, log_error) = match logs::open(&paths::logs_dir()) {
         Ok(file) => (Some(file), None),
         Err(e) => (None, Some(e)),
@@ -110,8 +111,8 @@ fn run() -> anyhow::Result<()> {
         }))
         .init();
     tracing::info!(
-        revision = env!("ROMP_BUILD_REVISION"),
-        "RomP {} on {} {}",
+        revision = env!("ROMLIN_BUILD_REVISION"),
+        "Romlin {} on {} {}",
         env!("CARGO_PKG_VERSION"),
         std::env::consts::OS,
         std::env::consts::ARCH
@@ -120,9 +121,6 @@ fn run() -> anyhow::Result<()> {
         tracing::warn!("opening the log file: {e}");
     }
     let args = Args::parse();
-    if let Err(e) = adopted {
-        tracing::warn!("moving the old data folder: {e}");
-    }
     let game_mode = gaming_mode::active();
     tracing::info!(
         game_mode,

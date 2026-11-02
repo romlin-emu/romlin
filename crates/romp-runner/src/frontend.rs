@@ -1,6 +1,6 @@
 use crate::audio_pipe::{self, SharedAudio};
 use crate::input::InputState;
-use romp_libretro as lr;
+use romlin_libretro as lr;
 
 pub struct VideoFrame {
     pub data: Vec<u8>,
@@ -98,7 +98,7 @@ impl lr::Frontend for Frontend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use romp_libretro::Frontend as _;
+    use romlin_libretro::Frontend as _;
 
     #[test]
     fn geometry_changes_update_the_aspect_ratio() {

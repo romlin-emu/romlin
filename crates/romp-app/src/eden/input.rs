@@ -6,13 +6,14 @@ use std::path::Path;
 type Settings = BTreeMap<String, String>;
 const MAX_PLAYERS: usize = 8;
 
-/// Refresh RomP's controller setup, preserving players customized in Eden.
+/// Refresh Romlin's controller setup, preserving players customized in Eden.
 pub fn prepare(exe: &Path, controllers: &[SdlController]) -> io::Result<()> {
     let dir = exe
         .parent()
         .ok_or_else(|| io::Error::other("Missing Eden directory"))?
         .join("user/config");
     let config = dir.join("qt-config.ini");
+    // Keep the ownership snapshot name so existing custom controller settings stay protected.
     let state = dir.join("romp-input.json");
     let existing = match std::fs::read_to_string(&config) {
         Ok(text) => text,
@@ -141,7 +142,7 @@ fn same_value(a: &str, b: &str) -> bool {
 fn can_configure(controls: &BTreeMap<&str, &str>, previous: &Settings, player: usize) -> bool {
     let prefix = format!("player_{player}_");
     let mut has_nondefault_input = false;
-    // A non-default input without a matching RomP snapshot belongs to the user.
+    // A non-default input without a matching Romlin snapshot belongs to the user.
     let customized = controls.iter().any(|(key, value)| {
         let Some(field) = key.strip_prefix(&prefix) else {
             return false;
@@ -268,7 +269,7 @@ fn config_text(
         );
     }
 
-    // Disconnect absent devices only in slots RomP still owns, keeping their bindings for reconnect.
+    // Disconnect absent devices only in slots Romlin still owns, keeping their bindings for reconnect.
     for player in 0..=MAX_PLAYERS {
         let prefix = format!("player_{player}_");
         if (matches!(player, 0 | 8) && !first_owned)
@@ -547,7 +548,7 @@ mod tests {
             };
             rewritten.insert(key.into(), value);
         }
-        // Eden marks booleans equal to their default as default even when RomP wrote false.
+        // Eden marks booleans equal to their default as default even when Romlin wrote false.
         rewritten.insert("player_0_connected\\default".into(), "true".into());
         let text = replace_settings(&text, "Controls", &rewritten);
         let (text, _) = config_text(&text, &[pad([9; 16]), pad(GUID)], &previous).unwrap();

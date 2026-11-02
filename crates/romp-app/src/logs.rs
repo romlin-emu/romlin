@@ -1,12 +1,12 @@
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-pub const FILE: &str = "romp.log";
+pub const FILE: &str = "romlin.log";
 const KEEP: usize = 5;
 const LIMIT: u64 = 20 * 1024 * 1024;
 
 fn older(dir: &Path, n: usize) -> PathBuf {
-    dir.join(format!("romp.{n}.log"))
+    dir.join(format!("romlin.{n}.log"))
 }
 
 /// Moves the earlier launches' logs along, keeping the newest few, and returns this launch's.
@@ -53,7 +53,7 @@ pub fn game_ended(title: &str, code: Option<i32>) -> String {
 }
 
 /// The newest game's part of a log, from its start line to its end line, or to the end of the
-/// log when the game was still running or RomP stopped with it.
+/// log when the game was still running or Romlin stopped with it.
 pub fn last_game(log: &str) -> Option<String> {
     let lines: Vec<&str> = log.lines().collect();
     let start = lines.iter().rposition(|l| l.contains(STARTED))?;
@@ -88,7 +88,7 @@ impl<W: Write> Write for Capped<W> {
         self.written += buf.len() as u64;
         if self.written >= self.limit {
             self.inner
-                .write_all(b"\nRomP stopped writing this log at its size limit.\n")?;
+                .write_all(b"\nRomlin stopped writing this log at its size limit.\n")?;
         }
         Ok(buf.len())
     }
@@ -157,8 +157,8 @@ mod tests {
     fn the_last_game_can_come_from_an_earlier_launch() {
         let dir = tempfile::tempdir().unwrap();
         let played = format!("{}\nline", game_started("Doom", "dosbox_pure"));
-        std::fs::write(dir.path().join("romp.2.log"), &played).unwrap();
-        std::fs::write(dir.path().join("romp.1.log"), "no games").unwrap();
+        std::fs::write(dir.path().join("romlin.2.log"), &played).unwrap();
+        std::fs::write(dir.path().join("romlin.1.log"), "no games").unwrap();
         std::fs::write(dir.path().join(FILE), "no games either").unwrap();
         assert_eq!(last_game_in(dir.path()).unwrap(), played);
         assert_eq!(last_game_in(&dir.path().join("missing")), None);
@@ -173,8 +173,8 @@ mod tests {
         }
         let read = |name: &str| std::fs::read_to_string(dir.path().join(name)).unwrap();
         assert_eq!(read(FILE), "launch 6");
-        assert_eq!(read("romp.1.log"), "launch 5");
-        assert_eq!(read("romp.4.log"), "launch 2");
+        assert_eq!(read("romlin.1.log"), "launch 5");
+        assert_eq!(read("romlin.4.log"), "launch 2");
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), KEEP);
     }
 
@@ -198,7 +198,7 @@ mod tests {
         log.write_all(b"more").unwrap();
         let text = String::from_utf8(log.inner).unwrap();
         assert!(text.starts_with("1234567890abc"));
-        assert!(text.ends_with("RomP stopped writing this log at its size limit.\n"));
+        assert!(text.ends_with("Romlin stopped writing this log at its size limit.\n"));
         assert!(!text.contains("more"));
     }
 }

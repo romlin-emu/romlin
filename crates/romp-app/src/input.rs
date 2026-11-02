@@ -1,6 +1,6 @@
 use crate::mapping::{combo, Hotkey, Mappings, Mods};
 use crate::players::PLAYERS;
-use romp_proto::msg::{AppMsg, PadState};
+use romlin_proto::msg::{AppMsg, PadState};
 use slint::platform::Key;
 
 pub const B: u32 = 0;

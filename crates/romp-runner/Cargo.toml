@@ -1,5 +1,5 @@
 [package]
-name = "romp-runner"
+name = "romlin-runner"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,13 +10,13 @@ publish = false
 path = "src/lib.rs"
 
 [[bin]]
-name = "romp-runner"
+name = "romlin-runner"
 path = "src/main.rs"
 
 [dependencies]
-romp-cheevos = { workspace = true }
-romp-libretro = { workspace = true }
-romp-proto = { workspace = true }
+romlin-cheevos = { workspace = true }
+romlin-libretro = { workspace = true }
+romlin-proto = { workspace = true }
 anyhow = "1"
 ash = "0.38"
 clap = { version = "4", features = ["derive"] }

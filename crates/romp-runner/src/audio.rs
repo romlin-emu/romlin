@@ -16,10 +16,10 @@ pub struct AudioOutput {
     _ctx: Context,
 }
 
-/// Opens the device at its own rate, so RomP does any conversion rather than the system: Windows
+/// Opens the device at its own rate, so Romlin does any conversion rather than the system: Windows
 /// warbles when handed a rate such as mGBA's 131072 Hz.
 pub fn open(core_rate: u32, buffer_ms: usize) -> anyhow::Result<(AudioOutput, AudioProducer)> {
-    let context_name = CString::new("RomP")?;
+    let context_name = CString::new("Romlin")?;
     let ctx = Context::init(Some(context_name.as_c_str()), None)?;
     let sample_rate = match ctx.preferred_sample_rate() {
         Ok(rate) if rate > 0 => rate,
@@ -50,7 +50,7 @@ pub fn open(core_rate: u32, buffer_ms: usize) -> anyhow::Result<(AudioOutput, Au
 
     let mut builder = StreamBuilder::<StereoFrame<i16>>::new();
     builder
-        .name(CString::new("RomP")?)
+        .name(CString::new("Romlin")?)
         .default_output(&params)
         .latency(min_latency.max(1024))
         .data_callback(

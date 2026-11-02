@@ -1,5 +1,5 @@
 [package]
-name = "romp-app"
+name = "romlin-app"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -7,15 +7,15 @@ repository.workspace = true
 publish = false
 
 [[bin]]
-name = "romp"
+name = "romlin"
 path = "src/main.rs"
 
 [package.metadata.cargo-machete]
 ignored = ["md-5", "sdl3-sys"]
 
 [dependencies]
-romp-cheevos = { workspace = true }
-romp-proto = { workspace = true }
+romlin-cheevos = { workspace = true }
+romlin-proto = { workspace = true }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 arboard = "3"
@@ -37,14 +37,12 @@ qrcode = { version = "0.14", default-features = false }
 rfd = "0.17"
 tempfile = "3"
 reqwest = { version = "0.13", features = ["json", "multipart", "query"] }
-rspolib = "0.1"
 sha1 = "0.11"
 sha2 = "0.11"
 sevenz-rust2 = { version = "0.23", default-features = false, features = ["bzip2", "deflate", "ppmd"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 slint = { version = "1", features = ["unstable-winit-030"] }
-sys-locale = "0.3"
 thiserror = "2"
 toml = "1.1"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync", "fs"] }
@@ -52,7 +50,7 @@ tokio-tungstenite = { version = "0.30", default-features = false, features = ["c
 futures-util = { version = "0.3", default-features = false, features = ["sink", "std"] }
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std"] }
 rustls-platform-verifier = "0.7"
-tr = { version = "0.1.11", default-features = false, features = ["mo-translator"] }
+tr = { version = "0.1.11", default-features = false }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"

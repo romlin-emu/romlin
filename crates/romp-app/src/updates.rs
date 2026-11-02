@@ -1,8 +1,8 @@
-//! Whether a newer RomP is out, and which of its downloads suits this computer.
+//! Whether a newer Romlin is out, and which of its downloads suits this computer.
 use crate::external::Asset;
 use serde::{Deserialize, Serialize};
 
-pub const RELEASES: &str = "https://api.github.com/repos/RompEmu/RomP/releases/latest";
+pub const RELEASES: &str = "https://api.github.com/repos/romlin-emu/romlin/releases/latest";
 pub const STATE_KEY: &str = "updates";
 const CHECK_EVERY: i64 = 24 * 60 * 60;
 
@@ -43,12 +43,12 @@ impl Platform {
 
     fn asset_name(self, version: &str) -> String {
         match self {
-            Self::MacOs => format!("RomP-{version}-macos-arm64.zip"),
-            Self::Windows => format!("RomP-{version}-windows-x86_64.zip"),
-            Self::AppImage => format!("RomP-{version}-x86_64.AppImage"),
-            Self::Deb => format!("RomP-{version}-x86_64.deb"),
-            Self::Rpm => format!("RomP-{version}-x86_64.rpm"),
-            Self::Linux => format!("RomP-{version}-linux-x86_64.tar.gz"),
+            Self::MacOs => format!("Romlin-{version}-macos-arm64.zip"),
+            Self::Windows => format!("Romlin-{version}-windows-x86_64.zip"),
+            Self::AppImage => format!("Romlin-{version}-x86_64.AppImage"),
+            Self::Deb => format!("Romlin-{version}-x86_64.deb"),
+            Self::Rpm => format!("Romlin-{version}-x86_64.rpm"),
+            Self::Linux => format!("Romlin-{version}-linux-x86_64.tar.gz"),
         }
     }
 }
@@ -154,18 +154,21 @@ pub async fn latest(
 /// This build's version. Development builds can pretend to be another, to try the update check.
 pub fn current_version() -> String {
     #[cfg(debug_assertions)]
-    if let Ok(pretend) = std::env::var("ROMP_PRETEND_VERSION") {
+    if let Ok(pretend) = std::env::var("ROMLIN_PRETEND_VERSION") {
         return pretend;
     }
     env!("CARGO_PKG_VERSION").to_string()
 }
 
-/// Whether Homebrew installed RomP, which then updates it with `brew upgrade`.
+/// Whether Homebrew installed Romlin, which then updates it with `brew upgrade`.
 pub fn homebrew() -> bool {
     cfg!(target_os = "macos")
-        && ["/opt/homebrew/Caskroom/romp", "/usr/local/Caskroom/romp"]
-            .iter()
-            .any(|dir| std::path::Path::new(dir).is_dir())
+        && [
+            "/opt/homebrew/Caskroom/romlin",
+            "/usr/local/Caskroom/romlin",
+        ]
+        .iter()
+        .any(|dir| std::path::Path::new(dir).is_dir())
 }
 
 #[cfg(test)]
@@ -177,7 +180,7 @@ mod tests {
     fn github(tag: &str, names: &[&str]) -> GitHubRelease {
         GitHubRelease {
             tag_name: tag.into(),
-            html_url: format!("https://github.com/RompEmu/RomP/releases/tag/{tag}"),
+            html_url: format!("https://github.com/romlin-emu/romlin/releases/tag/{tag}"),
             assets: names
                 .iter()
                 .map(|name| Asset {
@@ -190,24 +193,24 @@ mod tests {
     }
 
     const ALL_FILES: [&str; 12] = [
-        "RomP-0.13.1-linux-x86_64.tar.gz",
-        "RomP-0.13.1-linux-x86_64.tar.gz.sha512",
-        "RomP-0.13.1-macos-arm64.zip",
-        "RomP-0.13.1-macos-arm64.zip.sha512",
-        "RomP-0.13.1-windows-x86_64.zip",
-        "RomP-0.13.1-windows-x86_64.zip.sha512",
-        "RomP-0.13.1-x86_64.AppImage",
-        "RomP-0.13.1-x86_64.AppImage.sha512",
-        "RomP-0.13.1-x86_64.deb",
-        "RomP-0.13.1-x86_64.deb.sha512",
-        "RomP-0.13.1-x86_64.rpm",
-        "RomP-0.13.1-x86_64.rpm.sha512",
+        "Romlin-0.13.1-linux-x86_64.tar.gz",
+        "Romlin-0.13.1-linux-x86_64.tar.gz.sha512",
+        "Romlin-0.13.1-macos-arm64.zip",
+        "Romlin-0.13.1-macos-arm64.zip.sha512",
+        "Romlin-0.13.1-windows-x86_64.zip",
+        "Romlin-0.13.1-windows-x86_64.zip.sha512",
+        "Romlin-0.13.1-x86_64.AppImage",
+        "Romlin-0.13.1-x86_64.AppImage.sha512",
+        "Romlin-0.13.1-x86_64.deb",
+        "Romlin-0.13.1-x86_64.deb.sha512",
+        "Romlin-0.13.1-x86_64.rpm",
+        "Romlin-0.13.1-x86_64.rpm.sha512",
     ];
 
     fn release(version: &str) -> Release {
         Release {
             version: version.into(),
-            page: format!("https://github.com/RompEmu/RomP/releases/tag/v{version}"),
+            page: format!("https://github.com/romlin-emu/romlin/releases/tag/v{version}"),
             download: None,
         }
     }
@@ -239,12 +242,12 @@ mod tests {
                 .download
                 .unwrap()
         };
-        assert!(pick(Platform::MacOs).ends_with("/RomP-0.13.1-macos-arm64.zip"));
-        assert!(pick(Platform::Windows).ends_with("/RomP-0.13.1-windows-x86_64.zip"));
-        assert!(pick(Platform::AppImage).ends_with("/RomP-0.13.1-x86_64.AppImage"));
-        assert!(pick(Platform::Linux).ends_with("/RomP-0.13.1-linux-x86_64.tar.gz"));
-        assert!(pick(Platform::Deb).ends_with("/RomP-0.13.1-x86_64.deb"));
-        assert!(pick(Platform::Rpm).ends_with("/RomP-0.13.1-x86_64.rpm"));
+        assert!(pick(Platform::MacOs).ends_with("/Romlin-0.13.1-macos-arm64.zip"));
+        assert!(pick(Platform::Windows).ends_with("/Romlin-0.13.1-windows-x86_64.zip"));
+        assert!(pick(Platform::AppImage).ends_with("/Romlin-0.13.1-x86_64.AppImage"));
+        assert!(pick(Platform::Linux).ends_with("/Romlin-0.13.1-linux-x86_64.tar.gz"));
+        assert!(pick(Platform::Deb).ends_with("/Romlin-0.13.1-x86_64.deb"));
+        assert!(pick(Platform::Rpm).ends_with("/Romlin-0.13.1-x86_64.rpm"));
     }
 
     #[test]
@@ -261,7 +264,7 @@ mod tests {
         assert_eq!(found.version, "0.14.0");
         assert_eq!(
             found.page,
-            "https://github.com/RompEmu/RomP/releases/tag/v0.14.0"
+            "https://github.com/romlin-emu/romlin/releases/tag/v0.14.0"
         );
         assert_eq!(found.download, None);
     }
@@ -327,12 +330,12 @@ mod tests {
         let server = MockServer::start().await;
         let body = serde_json::json!({
             "tag_name": "v0.13.1",
-            "html_url": "https://github.com/RompEmu/RomP/releases/tag/v0.13.1",
+            "html_url": "https://github.com/romlin-emu/romlin/releases/tag/v0.13.1",
             "prerelease": false,
             "draft": false,
             "assets": ALL_FILES.iter().map(|name| serde_json::json!({
                 "name": name,
-                "browser_download_url": format!("https://github.com/RompEmu/RomP/releases/download/v0.13.1/{name}"),
+                "browser_download_url": format!("https://github.com/romlin-emu/romlin/releases/download/v0.13.1/{name}"),
                 "digest": "sha256:00",
             })).collect::<Vec<_>>(),
         });
@@ -352,7 +355,7 @@ mod tests {
         assert_eq!(found.version, "0.13.1");
         assert_eq!(
             found.download.as_deref(),
-            Some("https://github.com/RompEmu/RomP/releases/download/v0.13.1/RomP-0.13.1-windows-x86_64.zip")
+            Some("https://github.com/romlin-emu/romlin/releases/download/v0.13.1/Romlin-0.13.1-windows-x86_64.zip")
         );
     }
 

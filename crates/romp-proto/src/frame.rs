@@ -355,7 +355,7 @@ mod tests {
     fn unique_name() -> String {
         static N: AtomicU32 = AtomicU32::new(0);
         format!(
-            "/romp-t{}-{}",
+            "/romlin-t{}-{}",
             std::process::id(),
             N.fetch_add(1, Ordering::Relaxed)
         )

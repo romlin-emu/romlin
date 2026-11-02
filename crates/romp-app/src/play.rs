@@ -10,7 +10,7 @@ use crate::session::{Session, SessionConfig, SessionEvent};
 use crate::GameWindow;
 use crate::{LookRow, PortRow};
 use anyhow::Context;
-use romp_proto::msg::{AppMsg, RunnerMsg};
+use romlin_proto::msg::{AppMsg, RunnerMsg};
 use slint::{ComponentHandle, Image, Rgba8Pixel, SharedPixelBuffer, Timer, TimerMode};
 use slint::{ModelRc, VecModel};
 use std::cell::{Cell, RefCell};
@@ -151,7 +151,7 @@ pub fn run(
         GameOptions {
             screenshot_taken: Box::new(|_| {}),
             achievements: None,
-            look: std::env::var("ROMP_PLATFORM")
+            look: std::env::var("ROMLIN_PLATFORM")
                 .ok()
                 .map(|platform| LookOptions {
                     choice: crate::looks::default_choice(&platform),
@@ -255,7 +255,7 @@ struct Game {
     achievements_open: Cell<bool>,
     smoke: Option<RefCell<crate::smoke::Smoke>>,
     _awake: crate::awake::Awake,
-    achievement_list: RefCell<Vec<romp_proto::msg::AchievementInfo>>,
+    achievement_list: RefCell<Vec<romlin_proto::msg::AchievementInfo>>,
     hardcore: Cell<bool>,
     states: bool,
     save_dir: PathBuf,
@@ -912,7 +912,7 @@ impl Game {
         ui.set_achievements_scroll(scroll);
     }
 
-    fn achievement_list_arrived(&self, list: Vec<romp_proto::msg::AchievementInfo>) {
+    fn achievement_list_arrived(&self, list: Vec<romlin_proto::msg::AchievementInfo>) {
         let list = crate::achievements::without_notices(list);
         let label = crate::achievements::summary(&list);
         if let Some(link) = self.achievements.borrow_mut().as_mut() {
@@ -1349,10 +1349,7 @@ pub fn launch(
     let states = opts.states;
 
     let ui = GameWindow::new()?;
-    if !crate::i18n::applied() {
-        crate::i18n::apply(crate::i18n::pick(0));
-    }
-    ui.set_game_title(format!("{} — RomP", opts.title).into());
+    ui.set_game_title(format!("{} — Romlin", opts.title).into());
     ui.set_game_name(opts.title.clone().into());
     ui.set_mouse_mode(opts.mouse);
     ui.set_menu_key(if opts.computer { "F12" } else { "Esc" }.into());
@@ -1379,7 +1376,6 @@ pub fn launch(
         windows.push(window);
     }
     for window in &windows {
-        window.global::<crate::Locale>().set_rtl(crate::i18n::rtl());
         window.set_volume(i32::from(opts.prefs.volume));
     }
 
@@ -1618,7 +1614,7 @@ pub fn launch(
                     if let Some(link) = game.achievements.borrow_mut().as_mut() {
                         link.event(&event);
                     }
-                    if matches!(event, romp_proto::msg::AchievementEvent::HardcoreOff(_)) {
+                    if matches!(event, romlin_proto::msg::AchievementEvent::HardcoreOff(_)) {
                         game.hardcore.set(false);
                         for window in &game.windows {
                             window.set_hardcore(false);
@@ -1626,8 +1622,8 @@ pub fn launch(
                     }
                     if matches!(
                         event,
-                        romp_proto::msg::AchievementEvent::GameLoaded { .. }
-                            | romp_proto::msg::AchievementEvent::Unlocked { .. }
+                        romlin_proto::msg::AchievementEvent::GameLoaded { .. }
+                            | romlin_proto::msg::AchievementEvent::Unlocked { .. }
                     ) {
                         game.send(&AppMsg::ListAchievements);
                     }

@@ -13,7 +13,7 @@ use tr::tr;
 /// How long the card says a game is ready before it goes.
 const READY_FOR: Duration = Duration::from_secs(10);
 
-/// RomP takes games sent from RomM only when all of these hold.
+/// Romlin takes games sent from RomM only when all of these hold.
 #[derive(Debug, Clone, Copy)]
 struct InstallGate {
     signed_in: bool,
@@ -164,7 +164,7 @@ impl Controller {
                 *self.install_awaiting_sync.borrow_mut() = Some(request.id.clone());
                 return self.sync();
             }
-            let reason = tr!("This game isn't in RomP's library.");
+            let reason = tr!("This game isn't in Romlin's library.");
             return self.install_finished(request.id, Err(Some(reason)));
         };
         self.install_awaiting_sync.borrow_mut().take();

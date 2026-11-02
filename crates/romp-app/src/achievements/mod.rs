@@ -1,7 +1,7 @@
 pub mod popups;
 
 use crate::romm::types::{RaEarned, RomDetail, User};
-use romp_proto::msg::AchievementInfo;
+use romlin_proto::msg::AchievementInfo;
 use serde::Deserialize;
 
 const HOST: &str = "retroachievements.org";
@@ -79,20 +79,20 @@ fn now_millis() -> i64 {
 
 /// Keeps an unlock that didn't reach RetroAchievements, and forgets it once one attempt gets through.
 /// RetroAchievements only accepts hardcore unlocks from emulators on its approved list, which it
-/// considers once an emulator has been public for six months. Until Romp is on it, hardcore is off.
+/// considers once an emulator has been public for six months. Until Romlin is on it, hardcore is off.
 pub const HARDCORE_ALLOWED: bool = false;
 
 pub fn note_unlock(
     store: &std::sync::Mutex<crate::store::Store>,
     username: &str,
-    unlock: &romp_cheevos::Unlock,
+    unlock: &romlin_cheevos::Unlock,
     status: i32,
     body: &[u8],
 ) {
     let store = store.lock().unwrap();
-    match romp_cheevos::award_outcome(status, body) {
-        romp_cheevos::Award::Retry => store.add_pending_unlock(username, unlock, now_millis()),
-        romp_cheevos::Award::Accepted | romp_cheevos::Award::Refused => {
+    match romlin_cheevos::award_outcome(status, body) {
+        romlin_cheevos::Award::Retry => store.add_pending_unlock(username, unlock, now_millis()),
+        romlin_cheevos::Award::Accepted | romlin_cheevos::Award::Refused => {
             store.remove_pending_unlock(username, unlock);
         }
     }
@@ -123,7 +123,7 @@ async fn send_pending_unlocks_with<F, Fut>(
     send: F,
 ) -> usize
 where
-    F: Fn(romp_cheevos::Request) -> Fut,
+    F: Fn(romlin_cheevos::Request) -> Fut,
     Fut: std::future::Future<Output = (i32, Vec<u8>)>,
 {
     let pending = store.lock().unwrap().pending_unlocks(&account.username);
@@ -131,7 +131,7 @@ where
     for (unlock, unlocked_at) in pending {
         let seconds = u32::try_from((now_millis() - unlocked_at).max(0) / 1000).unwrap_or(u32::MAX);
         let Some(request) =
-            romp_cheevos::award_request(&account.username, &account.token, &unlock, seconds)
+            romlin_cheevos::award_request(&account.username, &account.token, &unlock, seconds)
         else {
             store
                 .lock()
@@ -140,15 +140,15 @@ where
             continue;
         };
         let (status, body) = send(request).await;
-        let outcome = romp_cheevos::award_outcome(status, &body);
-        if outcome == romp_cheevos::Award::Retry {
+        let outcome = romlin_cheevos::award_outcome(status, &body);
+        if outcome == romlin_cheevos::Award::Retry {
             break;
         }
         store
             .lock()
             .unwrap()
             .remove_pending_unlock(&account.username, &unlock);
-        if outcome == romp_cheevos::Award::Accepted {
+        if outcome == romlin_cheevos::Award::Accepted {
             sent += 1;
         }
     }
@@ -236,7 +236,7 @@ pub async fn from_retroachievements(
     game_id: u32,
     hash: Option<&str>,
 ) -> Option<Vec<AchievementInfo>> {
-    let send = |request: romp_cheevos::Request| async move {
+    let send = |request: romlin_cheevos::Request| async move {
         forward(
             http,
             &request.url,
@@ -246,13 +246,15 @@ pub async fn from_retroachievements(
         )
         .await
     };
-    let request = romp_cheevos::catalog_request(&account.username, &account.token, game_id, hash)?;
+    let request =
+        romlin_cheevos::catalog_request(&account.username, &account.token, game_id, hash)?;
     let (status, body) = send(request).await;
-    let (game_id, list) = romp_cheevos::parse_catalog(status, &body)?;
+    let (game_id, list) = romlin_cheevos::parse_catalog(status, &body)?;
     let mut list = without_notices(list);
-    let request = romp_cheevos::unlocks_request(&account.username, &account.token, game_id, false)?;
+    let request =
+        romlin_cheevos::unlocks_request(&account.username, &account.token, game_id, false)?;
     let (status, body) = send(request).await;
-    let earned = romp_cheevos::parse_unlocks(status, &body).unwrap_or_default();
+    let earned = romlin_cheevos::parse_unlocks(status, &body).unwrap_or_default();
     for a in &mut list {
         a.unlocked = earned.contains(&a.id);
     }
@@ -276,10 +278,10 @@ fn os() -> &'static str {
     }
 }
 
-/// `Romp/x.y.z (OS)` followed by what the runner adds: the core and rcheevos versions.
+/// `Romlin/x.y.z (OS)` followed by what the runner adds: the core and rcheevos versions.
 pub fn user_agent(runner_part: &str) -> String {
     format!(
-        "Romp/{} ({}) {runner_part}",
+        "Romlin/{} ({}) {runner_part}",
         env!("CARGO_PKG_VERSION"),
         os()
     )
@@ -383,7 +385,7 @@ pub async fn sign_in(
         .map_err(|_| tr::tr!("Could not reach RetroAchievements"))?
         .json()
         .await
-        .map_err(|_| tr::tr!("RetroAchievements sent an answer RomP did not understand"))?;
+        .map_err(|_| tr::tr!("RetroAchievements sent an answer Romlin did not understand"))?;
     if !reply.success || reply.token.is_empty() {
         return Err(if reply.error.is_empty() {
             tr::tr!("RetroAchievements did not accept the sign-in")
@@ -448,7 +450,7 @@ mod tests {
     async fn unlocks_made_offline_are_sent_later_with_their_age() {
         use wiremock::matchers::{body_string_contains, method};
         let store = std::sync::Mutex::new(crate::store::Store::open_in_memory().unwrap());
-        let unlock = romp_cheevos::Unlock {
+        let unlock = romlin_cheevos::Unlock {
             achievement_id: 39673,
             hardcore: false,
             hash: "abc".into(),
@@ -545,9 +547,9 @@ mod tests {
     }
 
     #[test]
-    fn the_user_agent_names_romp_then_the_core() {
+    fn the_user_agent_names_romlin_then_the_core() {
         let agent = user_agent("Snes9x/1.63 rcheevos/12.5");
-        assert!(agent.starts_with(&format!("Romp/{} (", env!("CARGO_PKG_VERSION"))));
+        assert!(agent.starts_with(&format!("Romlin/{} (", env!("CARGO_PKG_VERSION"))));
         assert!(agent.ends_with(") Snes9x/1.63 rcheevos/12.5"));
     }
 
@@ -558,7 +560,7 @@ mod tests {
             .and(body_string_contains("r=login2"))
             .and(body_string_contains("u=Player"))
             .and(body_string_contains("p=hunter2"))
-            .and(header_regex("user-agent", "^Romp/"))
+            .and(header_regex("user-agent", "^Romlin/"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "Success": true, "User": "player", "Token": "tok", "Score": 1
             })))

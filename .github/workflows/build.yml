@@ -67,10 +67,10 @@ jobs:
         run: make glibc-check
       - name: Include SteamOS installer
         if: runner.os == 'Linux'
-        run: cp packaging/steamos/install.py packaging/steamos/Install-RomP.desktop dist/
+        run: cp packaging/steamos/install.py packaging/steamos/Install-Romlin.desktop dist/
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: romp-${{ runner.os }}
+          name: romlin-${{ runner.os }}
           path: |
             dist/*.zip
             dist/*.tar.gz
@@ -79,5 +79,5 @@ jobs:
             dist/*.rpm
             dist/*.sha512
             dist/install.py
-            dist/Install-RomP.desktop
+            dist/Install-Romlin.desktop
           if-no-files-found: error

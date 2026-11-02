@@ -1,5 +1,5 @@
 """Writes tiny programs that turn the screen on with a colour, one per system, for smoke-testing
-Romp's cores. They're written here, so there's nothing to license."""
+Romlin's cores. They're written here, so there's nothing to license."""
 
 import struct
 import sys
@@ -91,7 +91,7 @@ def pico8():
     # PICO-8 carts are text: a light blue screen with a word on it, every frame.
     return (
         b"pico-8 cartridge // http://www.pico-8.com\nversion 41\n__lua__\n"
-        b"function _draw()\n cls(12)\n print(\"romp\",52,60,7)\nend\n"
+        b"function _draw()\n cls(12)\n print(\"romlin\",52,60,7)\nend\n"
     )
 
 
@@ -109,7 +109,7 @@ def gameboy():
     rom = bytearray(32 * 1024)
     rom[0x100:0x104] = bytes([0x00, 0xC3, 0x50, 0x01])  # nop, jp $0150
     rom[0x104:0x108] = bytes([0xCE, 0xED, 0x66, 0x66])  # what mGBA looks for to recognise a cartridge
-    rom[0x134:0x13D] = b"ROMPSMOKE"
+    rom[0x134:0x13F] = b"ROMLINSMOKE"
     rom[0x150:0x15B] = bytes([
         0xF3,                          # di
         0x3E, 0xE4, 0xE0, 0x47,        # background palette, colour 0 white
@@ -135,7 +135,7 @@ def gba():
     ]
     rom = bytearray(0x200)
     rom[0:4] = struct.pack("<I", words[0])
-    rom[0xA0:0xAC] = b"ROMPSMOKE".ljust(12, b"\0")
+    rom[0xA0:0xAC] = b"ROMLINSMOKE".ljust(12, b"\0")
     rom[0xB2] = 0x96
     rom[0xBD] = (-sum(rom[0xA0:0xBD]) - 0x19) & 0xFF  # header checksum
     for i, word in enumerate(code):
@@ -155,7 +155,7 @@ def snes():
         0x40,                          # rti at $801a, for interrupts
     ])
     rom = bytearray(code.ljust(32 * 1024, b"\xff"))
-    rom[0x7FC0:0x7FD5] = b"ROMP SMOKE".ljust(21)
+    rom[0x7FC0:0x7FD5] = b"ROMLIN SMOKE".ljust(21)
     rom[0x7FD5] = 0x20  # LoROM
     rom[0x7FD6] = 0x00  # ROM only
     rom[0x7FD7] = 0x05  # 32 KB
@@ -177,8 +177,8 @@ def genesis():
     rom = bytearray(0x4000)
     rom[0:8] = struct.pack(">II", 0x00FFFE00, 0x200)  # stack and entry point
     rom[0x100:0x110] = b"SEGA MEGA DRIVE "
-    rom[0x120:0x130] = b"ROMP SMOKE".ljust(16)
-    rom[0x150:0x160] = b"ROMP SMOKE".ljust(16)
+    rom[0x120:0x130] = b"ROMLIN SMOKE".ljust(16)
+    rom[0x150:0x160] = b"ROMLIN SMOKE".ljust(16)
     rom[0x1A0:0x1A8] = struct.pack(">II", 0, len(rom) - 1)
     rom[0x1A8:0x1B0] = struct.pack(">II", 0xFF0000, 0xFFFFFF)
     rom[0x1F0:0x1F3] = b"JUE"
@@ -272,7 +272,7 @@ def nintendo_ds():
     ]
     arm7 = [0xEAFFFFFE]  # b ., the ARM7 just waits
     rom = bytearray(0x1000)
-    rom[0:12] = b"ROMP SMOKE".ljust(12, b"\0")
+    rom[0:12] = b"ROMLIN SMOKE".ljust(12, b"\0")
     rom[12:16] = b"####"
     rom[0x20:0x30] = struct.pack("<IIII", 0x200, 0x02000000, 0x02000000, 4 * len(arm9))
     rom[0x30:0x40] = struct.pack("<IIII", 0x300, 0x02380000, 0x02380000, 4 * len(arm7))

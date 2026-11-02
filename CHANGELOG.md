@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to Romp are listed here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Romp uses [semantic versioning](https://semver.org/).
+Romlin continues the upstream RomP release history below. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Romlin uses [semantic versioning](https://semver.org/).
 
 ## [Unreleased]
 

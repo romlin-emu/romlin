@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting this. RomP doesn't include any games, so please don't attach game files or BIOS files, or link to them.
+        Thanks for reporting this. Romlin doesn't include any games, so please don't attach game files or BIOS files, or link to them.
   - type: input
     id: system
     attributes:
@@ -33,7 +33,7 @@ body:
         - Sound
         - Controls
         - In-game saves or save states
-        - RomP or the game closes
+        - Romlin or the game closes
         - Something else
     validations:
       required: true
@@ -41,7 +41,7 @@ body:
     id: what
     attributes:
       label: What happens
-      description: What you see or hear, when it starts, and what you expected. If RomP showed an error, copy it here.
+      description: What you see or hear, when it starts, and what you expected. If Romlin showed an error, copy it here.
     validations:
       required: true
   - type: dropdown
@@ -56,8 +56,8 @@ body:
   - type: input
     id: version
     attributes:
-      label: RomP version
-      description: "Shown in About RomP: Help → About RomP, or the ⓘ button."
+      label: Romlin version
+      description: "Shown in About Romlin: Help → About Romlin, or the ⓘ button."
       placeholder: "0.18.1"
     validations:
       required: true
@@ -74,9 +74,9 @@ body:
     attributes:
       label: Log
       description: |
-        Play the game until the problem happens and quit. Then in RomP open **About RomP**, choose **Copy the last game's log** and paste it here. It's the part of the log from `── Playing` to `── Stopped playing` for that game, with what its emulator reported.
-        Or choose **Show log** and drag the whole `romp.log` here.
-        **Xbox and PS3 games** run in xemu and RPCS3, separately from RomP, so Copy the last game's log skips them. For those, choose **Show log** and drag the whole `romp.log` here. It has what RomP did, though not what xemu or RPCS3 reported themselves.
+        Play the game until the problem happens and quit. Then in Romlin open **About Romlin**, choose **Copy the last game's log** and paste it here. It's the part of the log from `── Playing` to `── Stopped playing` for that game, with what its emulator reported.
+        Or choose **Show log** and drag the whole `romlin.log` here.
+        **Xbox and PS3 games** run in xemu and RPCS3, separately from Romlin, so Copy the last game's log skips them. For those, choose **Show log** and drag the whole `romlin.log` here. It has what Romlin did, though not what xemu or RPCS3 reported themselves.
         The log can include your server's address, game names and folder paths. Look it over first if that matters to you. It never includes your passwords or sign-in tokens.
   - type: textarea
     id: more

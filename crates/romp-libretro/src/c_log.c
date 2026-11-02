@@ -3,10 +3,10 @@
 #include <stdint.h>
 #include <string.h>
 
-uint32_t romp_core_log_min = 1;
+uint32_t romlin_core_log_min = 1;
 
-void romp_core_log(uint32_t level, const char *fmt, ...) {
-    if (!fmt || level < romp_core_log_min) return;
+void romlin_core_log(uint32_t level, const char *fmt, ...) {
+    if (!fmt || level < romlin_core_log_min) return;
     char buf[4096];
     va_list ap;
     va_start(ap, fmt);

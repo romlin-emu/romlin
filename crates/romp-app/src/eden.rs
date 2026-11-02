@@ -199,6 +199,7 @@ fn install_firmware(archive: &Path, home: &Path) -> Result<(), String> {
         tracing::info!(%firmware_name, "Switch firmware already installed");
         return Ok(());
     }
+    // Keep staging names so interrupted upstream installations remain recoverable.
     let stage = content.join("romp-firmware");
     if stage.exists() {
         std::fs::remove_dir_all(&stage).map_err(|e| e.to_string())?;

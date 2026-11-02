@@ -26,7 +26,7 @@ struct Manifest {
     exe: String,
 }
 
-/// An emulator Romp downloads from its GitHub releases and starts as its own program.
+/// An emulator Romlin downloads from its GitHub releases and starts as its own program.
 pub struct Emulator {
     pub name: &'static str,
     pub dir: PathBuf,

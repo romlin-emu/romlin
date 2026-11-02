@@ -1,47 +1,47 @@
-# The .deb and .rpm, built by `make packages` from the release binaries. RomP finds romp-runner
-# and its shaders beside the program, so everything goes in /opt/romp and the command links there.
-name: romp
+# The .deb and .rpm, built by `make packages` from the release binaries. Romlin finds romlin-runner
+# and its shaders beside the program, so everything goes in /opt/romlin and the command links there.
+name: romlin
 arch: amd64
 platform: linux
-version: ${ROMP_VERSION}
+version: ${ROMLIN_VERSION}
 section: games
-maintainer: Beshr Kayali Reinholdsson <me@beshr.com>
+maintainer: Romlin contributors
 description: Play retro games from your RomM library, with each game running in its own sandboxed process.
-homepage: https://rompemu.github.io
+homepage: https://romlin-emu.github.io
 license: GPL-3.0-or-later
 
 contents:
-  - src: target/release/romp
-    dst: /opt/romp/romp
+  - src: target/release/romlin
+    dst: /opt/romlin/romlin
     file_info:
       mode: 0755
-  - src: target/release/romp-runner
-    dst: /opt/romp/romp-runner
+  - src: target/release/romlin-runner
+    dst: /opt/romlin/romlin-runner
     file_info:
       mode: 0755
   - src: crates/romp-app/shaders
-    dst: /opt/romp/shaders
+    dst: /opt/romlin/shaders
     type: tree
-  # Tells RomP's update check which download replaces it.
+  # Tells Romlin's update check which download replaces it.
   - src: packaging/linux/package/deb
-    dst: /opt/romp/package
+    dst: /opt/romlin/package
     packager: deb
   - src: packaging/linux/package/rpm
-    dst: /opt/romp/package
+    dst: /opt/romlin/package
     packager: rpm
-  - src: /opt/romp/romp
-    dst: /usr/bin/romp
+  - src: /opt/romlin/romlin
+    dst: /usr/bin/romlin
     type: symlink
-  - src: packaging/linux/romp.desktop
-    dst: /usr/share/applications/romp.desktop
-  - src: packaging/linux/romp.png
-    dst: /usr/share/icons/hicolor/256x256/apps/romp.png
-  - src: packaging/linux/io.github.rompemu.romp.metainfo.xml
-    dst: /usr/share/metainfo/io.github.rompemu.romp.metainfo.xml
+  - src: packaging/linux/romlin.desktop
+    dst: /usr/share/applications/romlin.desktop
+  - src: packaging/linux/romlin.png
+    dst: /usr/share/icons/hicolor/256x256/apps/romlin.png
+  - src: packaging/linux/io.github.romlinemu.romlin.metainfo.xml
+    dst: /usr/share/metainfo/io.github.romlinemu.romlin.metainfo.xml
   - src: LICENSE
-    dst: /usr/share/doc/romp/LICENSE
+    dst: /usr/share/doc/romlin/LICENSE
 
-# What RomP links to, and what winit loads when it opens a window on X11 or Wayland. Sound and
+# What Romlin links to, and what winit loads when it opens a window on X11 or Wayland. Sound and
 # Vulkan are only recommended: a game still plays without them.
 overrides:
   deb:

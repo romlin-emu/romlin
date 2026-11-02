@@ -1,6 +1,6 @@
 use crate::archive::LoadedRom;
-use romp_cheevos::Session;
-use romp_proto::msg::{AchievementEvent, AchievementInfo, RunnerMsg};
+use romlin_cheevos::Session;
+use romlin_proto::msg::{AchievementEvent, AchievementInfo, RunnerMsg};
 
 /// The runner's side of RetroAchievements: rcheevos watches the game while the app does the talking.
 pub struct Achievements {
@@ -17,7 +17,7 @@ pub fn hardcore_conflict(
     console_id: u32,
     options: &[(String, String)],
 ) -> Option<String> {
-    if !romp_cheevos::system_allowed(core_library, console_id) {
+    if !romlin_cheevos::system_allowed(core_library, console_id) {
         return Some(format!(
             "{core_library} isn't allowed in hardcore for this system"
         ));
@@ -26,7 +26,7 @@ pub fn hardcore_conflict(
     options.sort();
     options
         .into_iter()
-        .find(|(key, value)| !romp_cheevos::setting_allowed(core_library, key, value))
+        .find(|(key, value)| !romlin_cheevos::setting_allowed(core_library, key, value))
         .map(|(key, value)| format!("the setting {key} = {value} isn't allowed in hardcore"))
 }
 
@@ -130,7 +130,7 @@ impl Achievements {
                 let conflict = hardcore_conflict(
                     &self.core_library,
                     self.session.console_id(),
-                    &romp_libretro::core_option_values(),
+                    &romlin_libretro::core_option_values(),
                 );
                 if let Some(reason) = conflict {
                     self.session.set_hardcore(false);

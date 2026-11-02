@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 pub const PLATFORM: &str = "ps3";
 pub const FIRMWARE: &str = "the PS3 system software (PS3UPDAT.PUP)";
 const MAX_PLAYERS: u8 = 7;
-const INPUT_PROFILE: &str = "romp";
+const INPUT_PROFILE: &str = "romlin";
 
 fn build() -> Option<(&'static str, &'static str)> {
     if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
@@ -62,7 +62,7 @@ pub fn emulator(dir: PathBuf) -> Emulator {
     }
 }
 
-/// RPCS3's settings, system software and saves, kept apart from any RPCS3 installed outside Romp.
+/// RPCS3's settings, system software and saves, kept apart from any RPCS3 installed outside Romlin.
 pub struct Home(pub PathBuf);
 
 impl Home {
@@ -164,7 +164,7 @@ pub fn boot_path(rom: &Path) -> Result<&Path, String> {
         .map(|e| format!(".{}", e.to_string_lossy()))
         .unwrap_or_else(|| name.clone());
     Err(tr::tr!(
-        "RomP plays PS3 games stored as a game folder, an ISO, or a zip or 7z of one, and this one is a {kind} file.",
+        "Romlin plays PS3 games stored as a game folder, an ISO, or a zip or 7z of one, and this one is a {kind} file.",
         kind
     ))
 }
@@ -481,7 +481,7 @@ mod tests {
     }
 
     #[test]
-    fn rpcs3_keeps_its_files_in_romps_folder() {
+    fn rpcs3_keeps_its_files_in_romlins_folder() {
         let home = Home(PathBuf::from("/data/rpcs3"));
         let env = home.env();
         assert!(!env.is_empty());

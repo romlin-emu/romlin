@@ -1,5 +1,5 @@
 [package]
-name = "romp-libretro"
+name = "romlin-libretro"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

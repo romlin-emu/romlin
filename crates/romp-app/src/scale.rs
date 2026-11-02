@@ -126,7 +126,7 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     #[test]
-    #[ignore = "requires X11: xvfb-run -a env WINIT_X11_SCALE_FACTOR=3 XDG_CURRENT_DESKTOP=KDE GAMESCOPE_WAYLAND_DISPLAY=gamescope-0 cargo test -p romp-app native_scale_lifecycle -- --ignored"]
+    #[ignore = "requires X11: xvfb-run -a env WINIT_X11_SCALE_FACTOR=3 XDG_CURRENT_DESKTOP=KDE GAMESCOPE_WAYLAND_DISPLAY=gamescope-0 cargo test -p romlin-app native_scale_lifecycle -- --ignored"]
     fn native_scale_lifecycle() {
         use slint::winit_030::winit::platform::x11::EventLoopBuilderExtX11;
         use slint::winit_030::{winit, CustomApplicationHandler, EventResult};

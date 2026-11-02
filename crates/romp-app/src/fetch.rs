@@ -6,7 +6,7 @@ use std::sync::atomic::AtomicBool;
 
 const CONTENT_HASHED: [&str; 2] = ["zip", "7z"];
 
-/// Formats only another emulator reads: (extension, that emulator, what RomP plays instead).
+/// Formats only another emulator reads: (extension, that emulator, what Romlin plays instead).
 const FOREIGN_FORMATS: [(&str, &str, &str); 1] = [("bigpimg", "BigPEmu", ".cue, .cdi or .chd")];
 
 pub fn foreign_format(file_name: &str) -> Option<Foreign> {

@@ -3,15 +3,15 @@ use std::io::Read;
 use std::path::PathBuf;
 
 pub const BUILDBOT: &str = "https://buildbot.libretro.com/nightly";
-pub const ARMSX2_RELEASE: &str = PS2_RELEASE;
-const PS2_RELEASE: &str = "https://github.com/RompEmu/RomP/releases/download/ps2-cores";
+pub const ARMSX2_RELEASE: &str = "https://github.com/romlin-emu/ARMSX2/releases/latest/download";
+const PCSX2_RELEASE: &str = "https://github.com/romlin-emu/parallel-ps2/releases/latest/download";
 #[cfg(windows)]
 const PCSX2_ASSET: &str = "pcsx2_libretro-windows-x86_64.zip";
 #[cfg(not(windows))]
 const PCSX2_ASSET: &str = "pcsx2_libretro-linux-x86_64.zip";
 const PCSX2: CoreInfo = core("pcsx2", "PCSX2", "pcsx2_libretro", true);
 const ARMSX2_ASSET: &str = "armsx2_libretro-macos-arm64.zip";
-pub const FAKE08_RELEASE: &str = "https://github.com/RompEmu/fake-08/releases/latest/download";
+pub const FAKE08_RELEASE: &str = "https://github.com/romlin-emu/fake-08/releases/latest/download";
 #[cfg(target_os = "macos")]
 const FAKE08_ASSET: &str = "fake08_libretro-macos-arm64.zip";
 #[cfg(windows)]
@@ -34,11 +34,11 @@ const fn core(id: &'static str, name: &'static str, lib: &'static str, jit: bool
 const ARMSX2: CoreInfo = core("armsx2", "ARMSX2", "armsx2_libretro", true);
 const FAKE08: CoreInfo = core("fake08", "FAKE-08", "fake08_libretro", false);
 
-/// Cores published by RompEmu, including PS2 builds with per-game texture loading:
+/// Cores published by Romlin, including PS2 builds with per-game texture loading:
 /// (core, where its releases are, this computer's file).
 const RELEASED: [(&CoreInfo, &str, &str); 3] = [
     (&ARMSX2, ARMSX2_RELEASE, ARMSX2_ASSET),
-    (&PCSX2, PS2_RELEASE, PCSX2_ASSET),
+    (&PCSX2, PCSX2_RELEASE, PCSX2_ASSET),
     (&FAKE08, FAKE08_RELEASE, FAKE08_ASSET),
 ];
 
@@ -449,7 +449,7 @@ pub fn default_options(core_id: &str) -> Vec<(String, String)> {
             ("pcsx2_renderer", "OpenGL"),
             ("pcsx2_shared_memory_cards", "disabled"),
         ],
-        // Both screens stacked with no gap, which Romp splits into two windows, touched with the mouse.
+        // Both screens stacked with no gap, which Romlin splits into two windows, touched with the mouse.
         "melondsds" => &[
             ("melonds_touch_mode", "touch"),
             ("melonds_show_cursor", "disabled"),
@@ -854,7 +854,7 @@ mod tests {
     }
 
     #[test]
-    fn pico8_plays_on_fake08_from_romps_own_release() {
+    fn pico8_plays_on_fake08_from_romlins_own_release() {
         let fake08 = core_for_platform("pico").unwrap();
         assert_eq!((fake08.id, fake08.lib), ("fake08", "fake08_libretro"));
         assert_eq!(download_base(fake08), FAKE08_RELEASE);

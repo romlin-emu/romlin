@@ -18,7 +18,7 @@ pub enum DownloadError {
     FirmwareUnavailable(Vec<String>),
 }
 
-/// A game kept in another emulator's own format, which no core RomP runs can read.
+/// A game kept in another emulator's own format, which no core Romlin runs can read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Foreign {
     pub ext: String,
@@ -37,7 +37,7 @@ impl std::fmt::Display for DownloadError {
             Self::UnsafePath => f.write_str(&tr!("The server sent an invalid file path")),
             Self::Unpack(e) => write!(f, "{e}"),
             Self::Foreign(found) => f.write_str(&tr!(
-                "This copy is in {0}'s own format ({1}), which RomP can't play. A {2} copy of the game would play.",
+                "This copy is in {0}'s own format ({1}), which Romlin can't play. A {2} copy of the game would play.",
                 found.owner,
                 found.ext,
                 found.instead
