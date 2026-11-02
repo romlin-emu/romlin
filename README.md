@@ -105,7 +105,7 @@ RomP downloads the emulator for each system the first time you play one of its g
 | Nintendo Switch (Linux and Windows, x86-64/ARM64) | Eden |
 | ZX Spectrum | Fuse |
 
-All emulators except xemu, RPCS3 and Eden are [libretro](https://www.libretro.com) cores. ARMSX2 and FAKE-08 aren't built by libretro, so RomP downloads them from RompEmu's own forks, which build them for each platform. Dolphin, PPSSPP, Flycast, Beetle PSX HW, Mupen64Plus-Next and the PS2 emulators draw through Vulkan when the computer has a working Vulkan driver, and through OpenGL otherwise. On macOS, Vulkan comes from the bundled [MoltenVK](https://github.com/KhronosGroup/MoltenVK). Some systems need BIOS files, which RomP takes from your RomM server's firmware. PS3 games need the PS3 system software (`PS3UPDAT.PUP`) in RomM's PS3 firmware, and play from a game folder or an ISO, or a zip or 7z of one.
+All emulators except xemu, RPCS3 and Eden are [libretro](https://www.libretro.com) cores. RomP downloads PCSX2 and ARMSX2 from its own PS2 core builds, which add per-game texture loading. FAKE-08 comes from RompEmu's fork. Dolphin, PPSSPP, Flycast, Beetle PSX HW, Mupen64Plus-Next and the PS2 emulators draw through Vulkan when the computer has a working Vulkan driver, and through OpenGL otherwise. On macOS, Vulkan comes from the bundled [MoltenVK](https://github.com/KhronosGroup/MoltenVK). Some systems need BIOS files, which RomP takes from your RomM server's firmware. PS3 games need the PS3 system software (`PS3UPDAT.PUP`) in RomM's PS3 firmware, and play from a game folder or an ISO, or a zip or 7z of one.
 
 ## SteamOS and Steam Deck
 
@@ -184,6 +184,9 @@ cargo build --release
 Enter your RomM server address (RomM 5.0 or newer). Approve RomP in RomM by scanning the code or opening the link.
 
 Open a game from your library to download and play it. RomP installs the emulator core it needs, and fetches BIOS files from your server's firmware. Downloaded games stay playable when the server is offline.
+
+For PS2 games using PCSX2 or ARMSX2, choose **Install texture ZIP…** on the game's page. Select a ZIP containing PNG or DDS replacement textures, either directly or inside a single `<serial>/replacements/` folder. RomP installs the pack for that game and loads it automatically on the next launch. Choose **Replace texture ZIP…** to install a different pack. Use a pack made for your game's region and revision; RomP does not verify texture hashes against the game. Packs stay local and are not synced through RomM. The first launch with a pack needs internet access to install a core with texture support.
+
 
 In-game saves and save states sync with RomM before and after you play, so you can continue on another device. If a save changed in both places, RomP asks which to keep and backs up the other.
 

@@ -141,6 +141,22 @@ msgid "RetroAchievements did not accept the sign-in"
 msgstr ""
 
 #: crates/romp-app/src/app/game.rs
+msgid "Select a texture replacements ZIP"
+msgstr ""
+
+#: crates/romp-app/src/app/game.rs
+msgid "Installing texture pack…"
+msgstr ""
+
+#: crates/romp-app/src/app/game.rs
+msgid "Texture pack installed. It will load when you start this game."
+msgstr ""
+
+#: crates/romp-app/src/app/game.rs
+msgid "Could not install texture pack: {}"
+msgstr ""
+
+#: crates/romp-app/src/app/game.rs
 msgid "RomP can't play {} games yet."
 msgstr ""
 
@@ -173,6 +189,14 @@ msgid "Still syncing your saves. Try again in a moment."
 msgstr ""
 
 #: crates/romp-app/src/app/game.rs
+msgid "Could not recover texture pack: {}"
+msgstr ""
+
+#: crates/romp-app/src/app/game.rs
+msgid "Connect to the internet once to install the PS2 core with texture support."
+msgstr ""
+
+#: crates/romp-app/src/app/game.rs
 msgid "Getting ready…"
 msgstr ""
 
@@ -198,6 +222,10 @@ msgstr ""
 
 #: crates/romp-app/src/app/game.rs crates/romp-app/src/rpcs3.rs
 msgid "Could not start {name}: {e}"
+msgstr ""
+
+#: crates/romp-app/src/app/game.rs crates/romp-app/src/app/save_sync.rs
+msgid "Couldn't sync saves: {e}."
 msgstr ""
 
 #: crates/romp-app/src/app/game.rs crates/romp-app/src/external.rs
@@ -324,10 +352,6 @@ msgstr ""
 
 #: crates/romp-app/src/app/save_sync.rs
 msgid "In-game save and save states synced."
-msgstr ""
-
-#: crates/romp-app/src/app/save_sync.rs
-msgid "Couldn't sync saves: {e}."
 msgstr ""
 
 #: crates/romp-app/src/app/settings.rs
@@ -922,8 +946,8 @@ msgstr ""
 msgid "Required firmware is still missing. RomM lists these files but returned 404 when downloading them: {}. Restore or re-upload them in this platform's firmware in RomM, then try again."
 msgstr ""
 
-#: crates/romp-app/src/eden.rs
-msgid "Several Switch firmware archives are available in {}. Rename the one to use to firmware.zip in that folder."
+#: crates/romp-app/src/saves.rs
+msgid "another emulator"
 msgstr ""
 
 #: crates/romp-app/src/external.rs
@@ -932,6 +956,10 @@ msgstr ""
 
 #: crates/romp-app/src/external.rs
 msgid "{name} is not available right now ({e})"
+msgstr ""
+
+#: crates/romp-app/src/external.rs
+msgid "Could not reach the download server for {name}"
 msgstr ""
 
 #: crates/romp-app/src/external.rs
@@ -1350,10 +1378,6 @@ msgstr ""
 
 #: crates/romp-app/src/rpcs3.rs
 msgid "The archive has no PS3 game folder or ISO in it"
-msgstr ""
-
-#: crates/romp-app/src/saves.rs
-msgid "another emulator"
 msgstr ""
 
 #: crates/romp-app/src/storage.rs

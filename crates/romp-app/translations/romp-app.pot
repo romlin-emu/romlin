@@ -272,6 +272,18 @@ msgid "No notifications"
 msgstr ""
 
 #: crates/romp-app/ui/app.slint
+msgid "Installing textures…"
+msgstr ""
+
+#: crates/romp-app/ui/app.slint
+msgid "Replace texture ZIP…"
+msgstr ""
+
+#: crates/romp-app/ui/app.slint
+msgid "Install texture ZIP…"
+msgstr ""
+
+#: crates/romp-app/ui/app.slint
 msgid "Delete download"
 msgstr ""
 

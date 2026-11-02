@@ -474,6 +474,39 @@ mod tests {
             "initial focus activates Cancel for an active transfer"
         );
 
+        ui.set_screen(SCREEN_LIBRARY);
+        ui.set_game_busy(false);
+        ui.set_game_supports_textures(true);
+        ui.set_game_can_install_textures(true);
+        let installs = std::rc::Rc::new(std::cell::Cell::new(0));
+        let count = installs.clone();
+        ui.on_install_textures(move || count.set(count.get() + 1));
+        ui.set_screen(SCREEN_GAME);
+        draw();
+        navigate_controls(ui.window(), DOWN);
+        navigate_controls(ui.window(), A);
+        assert_eq!(
+            installs.get(),
+            1,
+            "controller can select the texture ZIP action"
+        );
+        ui.window().request_redraw();
+        window.draw_if_needed(|renderer| {
+            let mut pixels = vec![slint::Rgb8Pixel::default(); 800 * 400];
+            renderer.render(&mut pixels, 800);
+            if let Some(path) = std::env::var_os("ROMP_TEXTURE_UI_CAPTURE") {
+                let rgb: Vec<u8> = pixels.iter().flat_map(|p| [p.r, p.g, p.b]).collect();
+                image::save_buffer(path, &rgb, 800, 400, image::ColorType::Rgb8).unwrap();
+            }
+        });
+        ui.set_game_can_install_textures(false);
+        navigate_controls(ui.window(), A);
+        assert_eq!(
+            installs.get(),
+            1,
+            "disabled texture action cannot start another install"
+        );
+
         ui.set_screen(SCREEN_SETTINGS);
         ui.set_settings_section(0);
         ui.set_pref_ui_scale(2);

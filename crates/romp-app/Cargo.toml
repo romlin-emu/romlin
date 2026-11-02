@@ -34,6 +34,8 @@ md-5 = "0.11"
 rusqlite = { version = "0.40", features = ["bundled"] }
 open = "5"
 qrcode = { version = "0.14", default-features = false }
+rfd = "0.17"
+tempfile = "3"
 reqwest = { version = "0.13", features = ["json", "multipart", "query"] }
 rspolib = "0.1"
 sha1 = "0.11"
@@ -63,7 +65,6 @@ slint-build = "1"
 winresource = "0.1"
 
 [dev-dependencies]
-tempfile = "3"
 wiremock = "0.6"
 
 [target.'cfg(unix)'.dependencies]
