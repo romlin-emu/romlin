@@ -355,9 +355,10 @@ mod tests {
             Some(0)
         );
         let args = std::fs::read_to_string(dir.path().join("args")).unwrap();
+        let cwd = dir.path().canonicalize().unwrap();
         assert_eq!(
             args.lines().collect::<Vec<_>>(),
-            [dir.path().to_str().unwrap(), "-f", "-g", "/roms/a game.nsp"]
+            [cwd.to_str().unwrap(), "-f", "-g", "/roms/a game.nsp"]
         );
     }
 
