@@ -92,9 +92,8 @@ fn unpack(bytes: &[u8], stage: &Path) -> io::Result<()> {
         let path = entry
             .enclosed_name()
             .ok_or_else(|| invalid("Unsafe save path"))?;
-        let name = path.to_string_lossy();
         if !path.components().all(|c| matches!(c, Component::Normal(_)))
-            || name.contains(['\\', ':'])
+            || entry.name_raw().contains(&b':')
             || !(path.starts_with("user/save") || path.starts_with("system/save"))
             || entry.unix_mode().is_some_and(|m| m & 0o170000 == 0o120000)
         {
@@ -358,7 +357,15 @@ mod tests {
         capture(&game).unwrap();
         let bytes = std::fs::read(game.join(FILE)).unwrap();
         let zip = zip::ZipArchive::new(io::Cursor::new(&bytes)).unwrap();
-        assert_eq!(zip.len(), 2);
+        assert_eq!(
+            zip.file_names()
+                .map(|name| name.unwrap())
+                .collect::<Vec<_>>(),
+            [
+                "system/save/8000000000000010/profiles.dat",
+                "user/save/account/title/progress"
+            ]
+        );
         let other = temp.path().join("game2");
         write(&other.join(FILE), &bytes);
         prepare(&exe, &other).unwrap();
@@ -463,6 +470,9 @@ mod tests {
             "keys/prod.keys",
             "system/Contents/registered/fw.nca",
             "user\\evil",
+            "user/save/account\\progress",
+            "user/save/account:progress",
+            "user/save/../outside",
             "user",
         ] {
             write(&game.join(FILE), &archive(bad, b"bad"));
