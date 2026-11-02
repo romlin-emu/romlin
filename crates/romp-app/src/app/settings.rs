@@ -61,13 +61,6 @@ impl Controller {
         ui.set_pref_popup_corners(names(&popups::CORNERS));
         ui.set_pref_achievement_popups(i32::from(prefs.achievement_popups));
         ui.set_pref_achievement_corner(i32::from(prefs.achievement_corner));
-        let languages: Vec<slint::SharedString> = [tr!("System"), "English".to_string()]
-            .into_iter()
-            .chain(crate::i18n::LANGUAGES.iter().map(|l| l.name.to_string()))
-            .map(slint::SharedString::from)
-            .collect();
-        ui.set_pref_languages(ModelRc::new(VecModel::from(languages)));
-        ui.set_pref_language(i32::from(prefs.language));
         ui.set_pref_ui_scale(
             UI_SCALES
                 .iter()
@@ -102,7 +95,6 @@ impl Controller {
                 .unwrap_or(100),
             achievement_popups: index_within(ui.get_pref_achievement_popups(), &popups::LEVELS),
             achievement_corner: index_within(ui.get_pref_achievement_corner(), &popups::CORNERS),
-            language: u8::try_from(ui.get_pref_language()).unwrap_or(0),
             check_updates: ui.get_pref_check_updates(),
             accept_installs: ui.get_pref_accept_installs(),
         };
@@ -127,17 +119,6 @@ impl Controller {
         }
         if prefs.accept_installs != before.accept_installs {
             self.refresh_installs();
-        }
-        if prefs.language != before.language {
-            crate::i18n::apply(crate::i18n::pick(prefs.language));
-            ui.global::<crate::Locale>().set_rtl(crate::i18n::rtl());
-            self.rebuild_rows();
-            self.reload_sidebar();
-            self.update_heading();
-            if self.offline.get() && !ui.get_syncing() {
-                ui.set_sync_status(tr!("Offline: showing downloaded games").into());
-            }
-            self.open_settings();
         }
     }
 
@@ -578,7 +559,7 @@ impl Controller {
         ui.set_settings_consoles(ModelRc::new(VecModel::from(groups)));
     }
 
-    /// The consoles in the library that Romp draws itself, with how each one's games look.
+    /// The consoles in the library that Romlin draws itself, with how each one's games look.
     fn show_looks(&self) {
         let Some(ui) = self.ui() else { return };
         let platforms = self.shared.store.lock().unwrap().platforms(false);
@@ -672,12 +653,12 @@ impl Controller {
     pub(super) fn copy_log(&self) {
         let Some(ui) = self.ui() else { return };
         let note = match crate::logs::last_game_in(&paths::logs_dir()) {
-            None => tr!("No game was played in RomP’s last five launches."),
+            None => tr!("No game was played in Romlin’s last five launches."),
             Some(log) => match arboard::Clipboard::new().and_then(|mut c| c.set_text(log)) {
                 Ok(()) => tr!("Copied. Paste it into your bug report."),
                 Err(e) => {
                     tracing::warn!("copying the log: {e}");
-                    tr!("The log couldn’t be copied. Use Show log and attach romp.log instead.")
+                    tr!("The log couldn’t be copied. Use Show log and attach romlin.log instead.")
                 }
             },
         };

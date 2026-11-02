@@ -1,11 +1,11 @@
 name: Idea or request
-description: Something RomP could do, or a system or emulator it could support.
+description: Something Romlin could do, or a system or emulator it could support.
 labels: ["enhancement"]
 body:
   - type: textarea
     id: what
     attributes:
-      label: What would you like RomP to do?
+      label: What would you like Romlin to do?
     validations:
       required: true
   - type: textarea

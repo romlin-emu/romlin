@@ -10,10 +10,10 @@ const fn notice(name: &'static str, license: &'static str, url: &'static str) ->
     Notice { name, license, url }
 }
 
-const ROMP: Notice = notice(
-    "RomP",
+const ROMLIN: Notice = notice(
+    "Romlin",
     "GPL-3.0 or later",
-    "https://github.com/RompEmu/RomP/blob/main/LICENSE",
+    "https://github.com/romlin-emu/romlin/blob/main/LICENSE",
 );
 const SLINT: Notice = notice(
     "Slint",
@@ -45,11 +45,6 @@ const INTER: Notice = notice(
     "SIL Open Font License 1.1",
     "https://github.com/rsms/inter/blob/master/LICENSE.txt",
 );
-const PLEX_ARABIC: Notice = notice(
-    "IBM Plex Sans Arabic",
-    "SIL Open Font License 1.1",
-    "https://github.com/IBM/plex/blob/master/LICENSE.txt",
-);
 const MOLTENVK: Notice = notice(
     "MoltenVK",
     "Apache-2.0",
@@ -60,12 +55,12 @@ static CORE_LICENSES: &[(&str, &str, &str)] = &[
     (
         "armsx2",
         "GPL-3.0",
-        "https://github.com/RompEmu/ARMSX2/blob/romp/COPYING.GPLv3",
+        "https://github.com/romlin-emu/ARMSX2/blob/romlin/COPYING.GPLv3",
     ),
     (
         "pcsx2",
         "GPL-3.0",
-        "https://github.com/libretro/ps2/blob/master/COPYING.GPLv3",
+        "https://github.com/romlin-emu/parallel-ps2/blob/romlin/COPYING.GPLv3",
     ),
     (
         "play",
@@ -245,7 +240,7 @@ static CORE_LICENSES: &[(&str, &str, &str)] = &[
     (
         "fake08",
         "MIT",
-        "https://github.com/RompEmu/fake-08/blob/romp/LICENSE.MD",
+        "https://github.com/romlin-emu/fake-08/blob/romlin/LICENSE.MD",
     ),
     (
         "tic80",
@@ -331,9 +326,9 @@ fn core_notice(core: &CoreInfo) -> Option<Notice> {
         .map(|(_, license, url)| notice(core.name, license, url))
 }
 
-/// Romp, then every emulator this computer can download, then the libraries it ships with.
+/// Romlin, then every emulator this computer can download, then the libraries it ships with.
 pub fn notices() -> Vec<Notice> {
-    let mut notices = vec![ROMP];
+    let mut notices = vec![ROMLIN];
     let mut cores: Vec<&CoreInfo> = all_cores().collect();
     cores.sort_by_key(|c| c.name.to_lowercase());
     cores.dedup_by_key(|c| c.id);
@@ -347,7 +342,6 @@ pub fn notices() -> Vec<Notice> {
     if cfg!(target_os = "macos") {
         notices.push(MOLTENVK);
     }
-    notices.push(PLEX_ARABIC);
     notices.push(INTER);
     notices.push(RCHEEVOS);
     notices.push(SDL);
@@ -360,7 +354,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_emulator_romp_downloads_has_its_license() {
+    fn every_emulator_romlin_downloads_has_its_license() {
         for core in all_cores() {
             assert!(
                 core_notice(core).is_some(),
@@ -369,11 +363,10 @@ mod tests {
             );
         }
         let names: Vec<_> = notices().iter().map(|n| n.name).collect();
-        assert_eq!(names[0], "RomP");
+        assert_eq!(names[0], "Romlin");
         assert!(names.contains(&"Slint"));
         assert!(names.contains(&"SDL"));
         assert!(names.contains(&"Inter"));
-        assert!(names.contains(&"IBM Plex Sans Arabic"));
         assert!(notices().iter().all(|n| n.url.starts_with("https://")));
     }
 }

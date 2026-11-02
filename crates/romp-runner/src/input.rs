@@ -1,6 +1,6 @@
 use parking_lot::Mutex;
-use romp_libretro as lr;
-use romp_proto::msg::PadState;
+use romlin_libretro as lr;
+use romlin_proto::msg::PadState;
 use std::sync::Arc;
 
 pub const PORTS: usize = 8;

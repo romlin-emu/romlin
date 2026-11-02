@@ -1,7 +1,7 @@
 use ash::vk;
 use parking_lot::lock_api::RawMutex as _;
 use parking_lot::{Mutex, RawMutex};
-use romp_libretro::{HwContextProvider, RETRO_HW_CONTEXT_VULKAN};
+use romlin_libretro::{HwContextProvider, RETRO_HW_CONTEXT_VULKAN};
 use std::cell::{OnceCell, RefCell};
 use std::ffi::{c_char, c_uint, c_void, CStr};
 use std::path::{Path, PathBuf};
@@ -206,7 +206,7 @@ pub struct HwVulkanContext {
 unsafe impl Send for HwVulkanContext {}
 
 pub fn library_path() -> PathBuf {
-    if let Some(path) = std::env::var_os("ROMP_VULKAN_LIBRARY") {
+    if let Some(path) = std::env::var_os("ROMLIN_VULKAN_LIBRARY") {
         return path.into();
     }
     let name = if cfg!(target_os = "macos") {
@@ -273,8 +273,8 @@ impl HwVulkanContext {
             flags |= vk::InstanceCreateFlags::ENUMERATE_PORTABILITY_KHR;
         }
         let app = vk::ApplicationInfo::default()
-            .application_name(c"Romp")
-            .engine_name(c"Romp")
+            .application_name(c"Romlin")
+            .engine_name(c"Romlin")
             .api_version(version.max(vk::API_VERSION_1_1));
         let info = vk::InstanceCreateInfo::default()
             .application_info(&app)
@@ -1297,6 +1297,6 @@ mod tests {
         );
         assert_eq!(ctx.negotiation_version(7), None);
         assert!(ctx.supports_context_type(RETRO_HW_CONTEXT_VULKAN));
-        assert!(!ctx.supports_context_type(romp_libretro::RETRO_HW_CONTEXT_OPENGL_CORE));
+        assert!(!ctx.supports_context_type(romlin_libretro::RETRO_HW_CONTEXT_OPENGL_CORE));
     }
 }

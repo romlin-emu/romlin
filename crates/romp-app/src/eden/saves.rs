@@ -233,6 +233,7 @@ pub fn prepare(exe: &Path, dir: &Path) -> io::Result<()> {
     let accounts = nand.join(ACCOUNT);
     if accounts.exists() {
         let early = portable.join("nand").join(ACCOUNT);
+        // Preserve backups created by earlier versions.
         let backup = early.with_extension("romp-backup");
         if early.exists() {
             if !backup.exists() {

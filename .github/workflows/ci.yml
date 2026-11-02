@@ -30,12 +30,12 @@ jobs:
           components: rustfmt
       - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2.87.29
         with:
-          tool: cargo-deny,cargo-machete,typos,zizmor,slint-tr-extractor@1.18.1,xtr@0.1.11
+          tool: cargo-deny,cargo-machete,typos,zizmor
       - name: Install actionlint
         run: |
           curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash \
             | bash -s -- 1.7.12 "$CARGO_HOME/bin"
-      - run: make fmt-check deny machete typos workflows translations-check
+      - run: make fmt-check deny machete typos workflows
       - name: Check SteamOS installer
         run: python3 -m unittest discover -s packaging/steamos -v
 

@@ -459,13 +459,22 @@ impl Store {
     }
 
     pub fn rebase_local_paths(&self, old: &str, new: &str) -> usize {
-        self.conn
+        let games = self
+            .conn
             .execute(
                 "UPDATE games SET local_path = ?2 || substr(local_path, length(?1) + 1)
                  WHERE substr(local_path, 1, length(?1)) = ?1",
                 params![old, new],
             )
-            .expect("rebase local paths")
+            .expect("rebase local paths");
+        self.conn
+            .execute(
+                "UPDATE pending_screenshots SET path = ?2 || substr(path, length(?1) + 1)
+                 WHERE substr(path, 1, length(?1)) = ?1",
+                params![old, new],
+            )
+            .expect("rebase pending screenshots");
+        games
     }
 
     pub fn recent_count(&self, downloaded_only: bool) -> i64 {
@@ -509,7 +518,7 @@ impl Store {
     pub fn add_pending_unlock(
         &self,
         username: &str,
-        unlock: &romp_cheevos::Unlock,
+        unlock: &romlin_cheevos::Unlock,
         unlocked_at: i64,
     ) {
         self.conn
@@ -527,7 +536,7 @@ impl Store {
             .expect("add pending unlock");
     }
 
-    pub fn pending_unlocks(&self, username: &str) -> Vec<(romp_cheevos::Unlock, i64)> {
+    pub fn pending_unlocks(&self, username: &str) -> Vec<(romlin_cheevos::Unlock, i64)> {
         let mut stmt = self
             .conn
             .prepare(
@@ -537,7 +546,7 @@ impl Store {
             .expect("prepare");
         stmt.query_map([username], |r| {
             Ok((
-                romp_cheevos::Unlock {
+                romlin_cheevos::Unlock {
                     achievement_id: r.get(0)?,
                     hardcore: r.get(1)?,
                     hash: r.get(2)?,
@@ -550,7 +559,7 @@ impl Store {
         .collect()
     }
 
-    pub fn remove_pending_unlock(&self, username: &str, unlock: &romp_cheevos::Unlock) {
+    pub fn remove_pending_unlock(&self, username: &str, unlock: &romlin_cheevos::Unlock) {
         self.conn
             .execute(
                 "DELETE FROM pending_unlocks WHERE username = ?1 AND achievement_id = ?2 AND hardcore = ?3",
@@ -1095,12 +1104,34 @@ mod tests {
         s.set_local_path(10, Some("/data/Cartridge/roms/10/Zelda.sfc"));
         s.set_local_path(11, Some("/elsewhere/Chrono.sfc"));
         s.set_local_path(12, Some("/data/Cartridge2/roms/12/Tetris.gb"));
-        assert_eq!(s.rebase_local_paths("/data/Cartridge/", "/data/Romp/"), 1);
+        assert_eq!(s.rebase_local_paths("/data/Cartridge/", "/data/Romlin/"), 1);
         let path = |id| s.game(id).unwrap().local_path.unwrap();
-        assert_eq!(path(10), "/data/Romp/roms/10/Zelda.sfc");
+        assert_eq!(path(10), "/data/Romlin/roms/10/Zelda.sfc");
         assert_eq!(path(11), "/elsewhere/Chrono.sfc");
         assert_eq!(path(12), "/data/Cartridge2/roms/12/Tetris.gb");
-        assert_eq!(s.rebase_local_paths("/data/Cartridge/", "/data/Romp/"), 0);
+        assert_eq!(s.rebase_local_paths("/data/Cartridge/", "/data/Romlin/"), 0);
+    }
+
+    #[test]
+    fn queued_screenshots_follow_a_moved_folder_with_native_windows_paths() {
+        let mut s = seeded();
+        s.set_local_path(10, Some(r"C:\data\Romp\roms\10\game.sfc"));
+        s.add_pending_screenshot(10, r"C:\data\Romp\saves\10\shot.png");
+        s.add_pending_screenshot(11, r"D:\screenshots\shot.png");
+        s.add_pending_screenshot(12, r"C:\data\Romp2\shot.png");
+        s.rebase_local_paths("C:\\data\\Romp\\", "C:\\data\\Romlin\\");
+        assert_eq!(
+            s.game(10).unwrap().local_path.as_deref(),
+            Some(r"C:\data\Romlin\roms\10\game.sfc")
+        );
+        assert_eq!(
+            s.pending_screenshots(),
+            vec![
+                (10, r"C:\data\Romlin\saves\10\shot.png".into()),
+                (11, r"D:\screenshots\shot.png".into()),
+                (12, r"C:\data\Romp2\shot.png".into()),
+            ]
+        );
     }
 
     #[test]
@@ -1244,7 +1275,7 @@ mod tests {
     #[test]
     fn unlocks_wait_for_retroachievements_and_keep_their_first_time() {
         let mut s = Store::open_in_memory().unwrap();
-        let unlock = |id| romp_cheevos::Unlock {
+        let unlock = |id| romlin_cheevos::Unlock {
             achievement_id: id,
             hardcore: false,
             hash: "abc".into(),

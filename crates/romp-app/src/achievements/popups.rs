@@ -1,4 +1,4 @@
-use romp_proto::msg::{AchievementEvent, AppMsg};
+use romlin_proto::msg::{AchievementEvent, AppMsg};
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -315,7 +315,9 @@ impl Link {
         let store = self.launch.store.clone();
         let username = self.launch.username.clone();
         self.launch.rt.spawn(async move {
-            let unlock = post.as_deref().and_then(romp_cheevos::Unlock::from_request);
+            let unlock = post
+                .as_deref()
+                .and_then(romlin_cheevos::Unlock::from_request);
             let (status, body) = super::forward(
                 &http,
                 &url,

@@ -77,7 +77,7 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: romp-${{ runner.os }}
+          name: romlin-${{ runner.os }}
           path: dist
       # Only what every Linux desktop has, PipeWire ones included: Mesa, X11's client libraries,
       # fontconfig with a font, and PulseAudio's library. libxkbcommon-x11 is left out on
@@ -110,26 +110,57 @@ jobs:
         run: |
           zypper --non-interactive install --no-recommends --allow-unsigned-rpm curl python3 \
             xvfb-run xauth Mesa-dri util-linux dejavu-fonts libpulse0 ./dist/*.rpm
-      - name: Unpack Romp
+      - name: Check the patched PS2 core download
+        if: matrix.name == 'macOS' || matrix.name == 'Windows' || matrix.package == 'appimage'
+        run: |
+          case "$RUNNER_OS" in
+            macOS)
+              repository=ARMSX2
+              archive=armsx2_libretro-macos-arm64.zip
+              library=armsx2_libretro.dylib
+              checksum=(shasum -a 256)
+              ;;
+            Linux)
+              repository=parallel-ps2
+              archive=pcsx2_libretro-linux-x86_64.zip
+              library=pcsx2_libretro.so
+              checksum=(sha256sum)
+              ;;
+            Windows)
+              repository=parallel-ps2
+              archive=pcsx2_libretro-windows-x86_64.zip
+              library=pcsx2_libretro.dll
+              checksum=(sha256sum)
+              ;;
+          esac
+          mkdir -p ps2
+          cd ps2
+          url="https://github.com/romlin-emu/$repository/releases/latest/download/$archive"
+          curl -fsSL -o "$archive" "$url"
+          curl -fsSL -o "$archive.sha256" "$url.sha256"
+          "${checksum[@]}" -c "$archive.sha256"
+          python="$(command -v python3 || command -v python)"
+          "$python" -c 'import sys, zipfile; assert any(name.rsplit("/", 1)[-1] == sys.argv[2] for name in zipfile.ZipFile(sys.argv[1]).namelist()), "PS2 library missing from archive"' "$archive" "$library"
+      - name: Unpack Romlin
         env:
           PACKAGE: ${{ matrix.package }}
         run: |
           case "$RUNNER_OS" in
             macOS)
               ditto -x -k dist/*-macos-*.zip app
-              echo "ROMP=$PWD/app/RomP.app" >> "$GITHUB_ENV"
+              echo "ROMLIN=$PWD/app/Romlin.app" >> "$GITHUB_ENV"
               ;;
             Linux)
               if [ "$PACKAGE" = appimage ]; then
                 chmod +x dist/*.AppImage
-                echo "ROMP=$(ls "$PWD"/dist/*.AppImage)" >> "$GITHUB_ENV"
+                echo "ROMLIN=$(ls "$PWD"/dist/*.AppImage)" >> "$GITHUB_ENV"
               else
-                echo "ROMP=/usr/bin/romp" >> "$GITHUB_ENV"
+                echo "ROMLIN=/usr/bin/romlin" >> "$GITHUB_ENV"
               fi
               ;;
             Windows)
               7z x -bso0 -oapp dist/*-windows-*.zip
-              echo "ROMP=$(ls "$PWD"/app/*/romp.exe)" >> "$GITHUB_ENV"
+              echo "ROMLIN=$(ls "$PWD"/app/*/romlin.exe)" >> "$GITHUB_ENV"
               ;;
           esac
       - name: Play a game on each core
@@ -149,14 +180,14 @@ jobs:
             library="cores/${core}_libretro.$LIBRARY"
             if [ ! -f "$library" ]; then
               url="https://buildbot.libretro.com/nightly/$CORES/latest/${core}_libretro.$LIBRARY.zip"
-              # FAKE-08 isn't on the buildbot: Romp downloads it from RompEmu's own fork.
+              # FAKE-08 isn't on the buildbot: Romlin downloads it from Romlin's own fork.
               if [ "$core" = fake08 ]; then
                 case "$CORES" in
                   apple/*) target=macos-arm64 ;;
                   windows/*) target=windows-x86_64 ;;
                   *) target=linux-x86_64 ;;
                 esac
-                url="https://github.com/RompEmu/fake-08/releases/latest/download/fake08_libretro-$target.zip"
+                url="https://github.com/romlin-emu/fake-08/releases/latest/download/fake08_libretro-$target.zip"
               fi
               curl -fsSL -o core.zip "$url"
               "$python" -m zipfile -e core.zip cores
@@ -165,11 +196,11 @@ jobs:
             args=(--core "$PWD/$library" --rom "$PWD/games/$game" --smoke "$PWD/out/$name")
             if [ "$RUNNER_OS" = macOS ]; then
               # Started the way Finder starts it. The runner has no GPU, and OpenGL without one
-              # draws so slowly that the window holds the game up, so Romp draws on the CPU here.
-              open -W -n "$ROMP" --env "ROMP_PLATFORM=$console" --env SLINT_BACKEND=winit-software \
+              # draws so slowly that the window holds the game up, so Romlin draws on the CPU here.
+              open -W -n "$ROMLIN" --env "ROMLIN_PLATFORM=$console" --env SLINT_BACKEND=winit-software \
                 --stdout "$PWD/out/$name.log" --stderr "$PWD/out/$name.err" --args "${args[@]}" || true
             else
-              ROMP_PLATFORM="$console" "${run[@]}" "$ROMP" "${args[@]}" > "out/$name.log" 2>&1 < /dev/null || true
+              ROMLIN_PLATFORM="$console" "${run[@]}" "$ROMLIN" "${args[@]}" > "out/$name.log" 2>&1 < /dev/null || true
             fi
             if grep -qx passed "out/$name/result.txt" 2> /dev/null; then
               echo "Played $game on $core"

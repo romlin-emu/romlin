@@ -1,5 +1,5 @@
 use crate::frontend::Frontend;
-use romp_libretro as lr;
+use romlin_libretro as lr;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
@@ -15,7 +15,7 @@ pub fn slot_file_name(slot: u8) -> String {
 }
 
 /// DOSBox Pure names its save after the file it is given, which for a game unpacked from a 7z
-/// or a CD-only zip is the file inside, while RomP brings the save down under the archive's name.
+/// or a CD-only zip is the file inside, while Romlin brings the save down under the archive's name.
 pub fn hand_dos_save_over(save_dir: &Path, rom: &Path, effective: &Path) {
     let save = |path: &Path| {
         path.file_stem()

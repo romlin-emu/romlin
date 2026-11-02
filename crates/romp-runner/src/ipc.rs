@@ -1,8 +1,8 @@
 use crate::input::InputState;
 use parking_lot::Mutex;
-use romp_proto::msg::{AppMsg, RunnerMsg};
-use romp_proto::socket::UnixStream;
-use romp_proto::wire;
+use romlin_proto::msg::{AppMsg, RunnerMsg};
+use romlin_proto::socket::UnixStream;
+use romlin_proto::wire;
 use std::path::Path;
 use std::sync::mpsc::{self, Receiver};
 
@@ -57,7 +57,7 @@ impl Link {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use romp_proto::msg::PadState;
+    use romlin_proto::msg::PadState;
     use std::time::{Duration, Instant};
 
     fn wait_for(mut cond: impl FnMut() -> bool) {

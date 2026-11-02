@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install the nightly RomP AppImage and Steam library artwork without modifying SteamOS."""
+"""Install the nightly Romlin AppImage and Steam library artwork without modifying SteamOS."""
 
 import hashlib
 import json
@@ -12,7 +12,7 @@ import tempfile
 import urllib.request
 
 
-REPO = "aaronflorey/RomP"
+REPO = "romlin-emu/romlin"
 
 
 def download(url, target):
@@ -76,8 +76,8 @@ def steam_shortcuts(folder):
     for root in roots:
         for database in (root / "userdata").glob("*/config/shortcuts.vdf"):
             for entry in read_shortcuts(database.read_bytes()).values():
-                if (isinstance(entry, dict) and entry.get("appname") == "RomP"
-                        and str(folder / "RomP.AppImage") in entry.get("exe", "")
+                if (isinstance(entry, dict) and entry.get("appname") == "Romlin"
+                        and str(folder / "Romlin.AppImage") in entry.get("exe", "")
                         and isinstance(entry.get("appid"), int)):
                     matches.append((database.parent / "grid", entry["appid"]))
     return matches
@@ -86,7 +86,7 @@ def steam_shortcuts(folder):
 def install_artwork(folder):
     matches = steam_shortcuts(folder)
     if not matches:
-        raise RuntimeError("RomP is installed, but its saved Steam shortcut was not found. "
+        raise RuntimeError("Romlin is installed, but its saved Steam shortcut was not found. "
                            "Exit Steam and rerun the installer.")
     artwork = {"capsule.png": "p", "header.png": "", "hero.png": "_hero",
                "logo.png": "_logo", "icon.png": "_icon"}
@@ -113,7 +113,7 @@ def install_artwork(folder):
                         staged.unlink(missing_ok=True)
                 for extension in ("jpg", "jpeg", "webp", "tga"):
                     target.with_suffix("." + extension).unlink(missing_ok=True)
-    subprocess.run(["kdialog", "--title", "RomP ready", "--msgbox",
+    subprocess.run(["kdialog", "--title", "Romlin ready", "--msgbox",
                     "Steam artwork installed. Restart Steam or return to Gaming Mode."], check=True)
 
 
@@ -126,13 +126,13 @@ def install():
     if not helper:
         raise RuntimeError("SteamOS's steamos-add-to-steam helper was not found.")
 
-    subprocess.run(["kdialog", "--title", "Install RomP", "--msgbox",
-                    "RomP will download the latest nightly build to ~/Applications/RomP. "
-                    "An existing installation there will be updated. Close RomP before continuing. "
+    subprocess.run(["kdialog", "--title", "Install Romlin", "--msgbox",
+                    "Romlin will download the latest nightly build to ~/Applications/Romlin. "
+                    "An existing installation there will be updated. Close Romlin before continuing. "
                     "No password is needed. The download may take a few minutes."], check=True)
     request = urllib.request.Request(
         f"https://api.github.com/repos/{REPO}/releases/tags/nightly",
-        headers={"Accept": "application/vnd.github+json", "User-Agent": "RomP-installer"},
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "Romlin-installer"},
     )
     with urllib.request.urlopen(request, timeout=60) as response:
         release = json.load(response)
@@ -141,7 +141,7 @@ def install():
     if len(images) != 1 or images[0] + ".sha512" not in assets:
         raise RuntimeError("The nightly release has no x86_64 AppImage and checksum.")
     name = images[0]
-    folder = Path.home() / "Applications" / "RomP"
+    folder = Path.home() / "Applications" / "Romlin"
     folder.mkdir(parents=True, exist_ok=True)
     # Stage on the same filesystem, so a failed download leaves the old app intact.
     with tempfile.TemporaryDirectory(prefix=".install-", dir=folder) as staging:
@@ -157,30 +157,30 @@ def install():
         if digest.hexdigest() != expected:
             raise RuntimeError("Download checksum failed; your existing app was kept.")
         image.chmod(0o755)
-        image.replace(folder / "RomP.AppImage")
+        image.replace(folder / "Romlin.AppImage")
 
     applications = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local/share")) / "applications"
     applications.mkdir(parents=True, exist_ok=True)
-    launcher = applications / "io.github.rompemu.romp.desktop"
+    launcher = applications / "io.github.romlinemu.romlin.desktop"
     # Percent is a desktop field-code marker even inside quotes.
-    executable = desktop_quote(str(folder / "RomP.AppImage").replace("%", "%%"))
+    executable = desktop_quote(str(folder / "Romlin.AppImage").replace("%", "%%"))
     launcher.write_text(
-        "[Desktop Entry]\nType=Application\nName=RomP\n"
+        "[Desktop Entry]\nType=Application\nName=Romlin\n"
         "Comment=Play retro games from your RomM library\n"
         f"Exec={executable} --appimage-extract-and-run\n"
         "Icon=applications-games\nCategories=Game;Emulator;\nTerminal=false\n"
     )
     launcher.chmod(0o755)
-    subprocess.run(["kdialog", "--title", "RomP Steam artwork", "--msgbox",
+    subprocess.run(["kdialog", "--title", "Romlin Steam artwork", "--msgbox",
                     "Exit Steam using Steam → Exit, then click OK. This saves any existing "
-                    "RomP shortcut so the installer can reuse it and update its artwork."], check=True)
+                    "Romlin shortcut so the installer can reuse it and update its artwork."], check=True)
     if not steam_shortcuts(folder):
-        add = subprocess.run(["kdialog", "--title", "RomP installed", "--yesno",
-                              "Add RomP to Steam now?"])
+        add = subprocess.run(["kdialog", "--title", "Romlin installed", "--yesno",
+                              "Add Romlin to Steam now?"])
         if add.returncode == 0:
             subprocess.run([helper, str(launcher)], check=True)
-            subprocess.run(["kdialog", "--title", "RomP Steam artwork", "--msgbox",
-                            "Finish adding RomP, then exit Steam using Steam → Exit. "
+            subprocess.run(["kdialog", "--title", "Romlin Steam artwork", "--msgbox",
+                            "Finish adding Romlin, then exit Steam using Steam → Exit. "
                             "Click OK once Steam has closed to install the artwork."], check=True)
         elif add.returncode == 1:
             return
@@ -193,7 +193,7 @@ if __name__ == "__main__":
     try:
         install()
     except Exception as error:
-        message = f"RomP installation could not finish: {error}\nYou can run the installer again."
+        message = f"Romlin installation could not finish: {error}\nYou can run the installer again."
         print(message, flush=True)
-        subprocess.run(["kdialog", "--title", "Install RomP", "--error", message])
+        subprocess.run(["kdialog", "--title", "Install Romlin", "--error", message])
         raise SystemExit(1)

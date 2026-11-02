@@ -1,38 +1,53 @@
 use std::path::PathBuf;
 
 pub fn data_dir() -> PathBuf {
-    std::env::var_os("ROMP_DATA_DIR")
+    std::env::var_os("ROMLIN_DATA_DIR")
+        .or_else(|| std::env::var_os("ROMP_DATA_DIR")) // Preserve custom profiles from upstream.
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             dirs::data_local_dir()
                 .unwrap_or_else(std::env::temp_dir)
-                .join("Romp")
+                .join("Romlin")
         })
 }
 
-const LEGACY_DIR: &str = "Cartridge";
-const LEGACY_DB: &str = "cartridge.db";
-const DB_FILE: &str = "romp.db";
+const DB_FILE: &str = "romlin.db";
 
-pub fn legacy_data_dir(data: &std::path::Path) -> PathBuf {
-    data.with_file_name(LEGACY_DIR)
+pub fn legacy_data_dirs(data: &std::path::Path) -> [PathBuf; 2] {
+    [
+        data.with_file_name("Romp"),
+        data.with_file_name("Cartridge"),
+    ]
 }
 
 pub fn adopt_legacy_data(data: &std::path::Path) -> std::io::Result<Option<PathBuf>> {
-    let legacy = legacy_data_dir(data);
-    let moved = !data.exists() && legacy.is_dir();
-    if moved {
-        std::fs::rename(&legacy, data)?;
+    let legacy = legacy_data_dirs(data).into_iter().find(|dir| dir.is_dir());
+    let moved = legacy.filter(|_| !data.exists());
+    if let Some(legacy) = &moved {
+        std::fs::rename(legacy, data)?;
     }
     if !data.join(DB_FILE).exists() {
-        for suffix in ["", "-wal", "-shm"] {
-            let old = data.join(format!("{LEGACY_DB}{suffix}"));
-            if old.exists() {
-                std::fs::rename(old, data.join(format!("{DB_FILE}{suffix}")))?;
+        for legacy_db in ["romp.db", "cartridge.db"] {
+            if !data.join(legacy_db).exists() {
+                continue;
             }
+            for suffix in ["-wal", "-shm"] {
+                if data.join(format!("{DB_FILE}{suffix}")).exists() {
+                    return Err(std::io::Error::new(std::io::ErrorKind::AlreadyExists,
+                        "A Romlin database sidecar already exists; keep both databases before retrying migration"));
+                }
+            }
+            // The main file moves last, so a sidecar failure cannot open an incomplete database.
+            for suffix in ["-wal", "-shm", ""] {
+                let old = data.join(format!("{legacy_db}{suffix}"));
+                if old.exists() {
+                    std::fs::rename(old, data.join(format!("{DB_FILE}{suffix}")))?;
+                }
+            }
+            break;
         }
     }
-    Ok(moved.then_some(legacy))
+    Ok(moved)
 }
 
 pub fn logs_dir() -> PathBuf {
@@ -61,7 +76,7 @@ pub fn db_path() -> PathBuf {
 
 pub fn runner_exe() -> std::io::Result<PathBuf> {
     Ok(std::env::current_exe()?
-        .with_file_name(format!("romp-runner{}", std::env::consts::EXE_SUFFIX)))
+        .with_file_name(format!("romlin-runner{}", std::env::consts::EXE_SUFFIX)))
 }
 
 /// The bundled shader presets: beside the program, in a macOS app's Resources, or in the source tree.
@@ -133,12 +148,12 @@ mod tests {
         std::fs::create_dir_all(old.join("saves/7")).unwrap();
         std::fs::write(old.join("cartridge.db"), b"db").unwrap();
         std::fs::write(old.join("cartridge.db-wal"), b"wal").unwrap();
-        let data = root.path().join("Romp");
+        let data = root.path().join("Romlin");
         assert_eq!(adopt_legacy_data(&data).unwrap(), Some(old.clone()));
         assert!(!old.exists());
         assert!(data.join("saves/7").is_dir());
-        assert_eq!(std::fs::read(data.join("romp.db")).unwrap(), b"db");
-        assert_eq!(std::fs::read(data.join("romp.db-wal")).unwrap(), b"wal");
+        assert_eq!(std::fs::read(data.join("romlin.db")).unwrap(), b"db");
+        assert_eq!(std::fs::read(data.join("romlin.db-wal")).unwrap(), b"wal");
         assert_eq!(
             adopt_legacy_data(&data).unwrap(),
             None,
@@ -147,15 +162,67 @@ mod tests {
     }
 
     #[test]
+    fn romp_data_moves_before_the_older_cartridge_data() {
+        let root = tempfile::tempdir().unwrap();
+        let old = root.path().join("Romp");
+        std::fs::create_dir_all(old.join("saves/7")).unwrap();
+        std::fs::create_dir(root.path().join("Cartridge")).unwrap();
+        for suffix in ["", "-wal", "-shm"] {
+            std::fs::write(old.join(format!("romp.db{suffix}")), b"data").unwrap();
+        }
+        let data = root.path().join("Romlin");
+        assert_eq!(adopt_legacy_data(&data).unwrap(), Some(old.clone()));
+        assert!(!old.exists());
+        assert!(root.path().join("Cartridge").is_dir());
+        assert!(data.join("saves/7").is_dir());
+        for suffix in ["", "-wal", "-shm"] {
+            assert_eq!(
+                std::fs::read(data.join(format!("romlin.db{suffix}"))).unwrap(),
+                b"data"
+            );
+        }
+        assert_eq!(adopt_legacy_data(&data).unwrap(), None);
+    }
+
+    #[test]
+    fn migration_preserves_conflicting_database_sidecars() {
+        let root = tempfile::tempdir().unwrap();
+        let data = root.path().join("Romlin");
+        std::fs::create_dir(&data).unwrap();
+        std::fs::write(data.join("romp.db"), b"old database").unwrap();
+        std::fs::write(data.join("romp.db-wal"), b"old journal").unwrap();
+        std::fs::write(data.join("romlin.db-wal"), b"keep me").unwrap();
+        assert_eq!(
+            adopt_legacy_data(&data).unwrap_err().kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
+        assert_eq!(
+            std::fs::read(data.join("romp.db")).unwrap(),
+            b"old database"
+        );
+        assert_eq!(
+            std::fs::read(data.join("romp.db-wal")).unwrap(),
+            b"old journal"
+        );
+        assert_eq!(
+            std::fs::read(data.join("romlin.db-wal")).unwrap(),
+            b"keep me"
+        );
+        assert!(!data.join("romlin.db").exists());
+    }
+
+    #[test]
     fn existing_new_data_is_never_replaced() {
         let root = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(root.path().join("Cartridge")).unwrap();
-        let data = root.path().join("Romp");
+        std::fs::create_dir_all(root.path().join("Romp")).unwrap();
+        let data = root.path().join("Romlin");
         std::fs::create_dir_all(&data).unwrap();
-        std::fs::write(data.join("romp.db"), b"new").unwrap();
+        std::fs::write(data.join("romlin.db"), b"new").unwrap();
         assert_eq!(adopt_legacy_data(&data).unwrap(), None);
         assert!(root.path().join("Cartridge").exists());
-        assert_eq!(std::fs::read(data.join("romp.db")).unwrap(), b"new");
+        assert!(root.path().join("Romp").exists());
+        assert_eq!(std::fs::read(data.join("romlin.db")).unwrap(), b"new");
     }
     use std::path::Path;
 

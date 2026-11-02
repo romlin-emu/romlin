@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=RomP
+Name=Romlin
 Comment=Play retro games from your RomM library
-Exec=romp
-Icon=romp
+Exec=romlin
+Icon=romlin
 Categories=Game;Emulator;
 Terminal=false

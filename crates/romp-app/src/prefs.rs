@@ -15,10 +15,8 @@ pub struct Preferences {
     pub achievement_popups: u8,
     /// Where it shows it: an index into `popups::CORNERS`.
     pub achievement_corner: u8,
-    /// 0 follows the system, then English, then `i18n::LANGUAGES` in order.
-    pub language: u8,
     pub check_updates: bool,
-    /// Whether RomP offers itself under RomM's "Install on device", and downloads what comes.
+    /// Whether Romlin offers itself under RomM's "Install on device", and downloads what comes.
     pub accept_installs: bool,
 }
 
@@ -32,7 +30,6 @@ impl Default for Preferences {
             ui_scale: 100,
             achievement_popups: 1,
             achievement_corner: 0,
-            language: 0,
             check_updates: true,
             accept_installs: true,
         }
@@ -59,9 +56,6 @@ impl Preferences {
         let last = |list: &[&str]| (list.len() - 1) as u8;
         prefs.achievement_popups = prefs.achievement_popups.min(last(&popups::LEVELS));
         prefs.achievement_corner = prefs.achievement_corner.min(last(&popups::CORNERS));
-        if usize::from(prefs.language) > crate::i18n::LANGUAGES.len() + 1 {
-            prefs.language = 0;
-        }
         prefs
     }
 
@@ -154,11 +148,13 @@ mod tests {
     }
 
     #[test]
-    fn an_unknown_saved_language_means_system() {
-        let p = Preferences::from_json(Some(r#"{"language": 9}"#));
-        assert_eq!(p.language, 0);
-        let p = Preferences::from_json(Some(r#"{"language": 2}"#));
-        assert_eq!(p.language, 2);
-        assert_eq!(Preferences::default().language, 0);
+    fn retired_language_choices_preserve_other_saved_preferences() {
+        let p = Preferences::from_json(Some(
+            r#"{"language": 5, "volume": 40, "accept_installs": false}"#,
+        ));
+        assert_eq!(p.volume, 40);
+        assert!(!p.accept_installs);
+        assert!(p.pause_unfocused);
+        assert!(!p.to_json().contains("language"));
     }
 }

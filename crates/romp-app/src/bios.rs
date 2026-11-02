@@ -389,7 +389,7 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_json(list))
             .mount(&server)
             .await;
-        for (id, name) in [(1, "Firmware v19.0.10.zip"), (4, "prod.keys")] {
+        for (id, name) in [(1, "Firmware%20v19.0.10.zip"), (4, "prod.keys")] {
             Mock::given(method("GET"))
                 .and(path(format!("/api/firmware/{id}/content/{name}")))
                 .respond_with(ResponseTemplate::new(200).set_body_string("content"))

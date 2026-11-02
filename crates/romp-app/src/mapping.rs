@@ -2,7 +2,7 @@ use crate::gamepads::Button;
 use crate::gettext_noop;
 use crate::input::{A, B, DOWN, L, L2, L3, LEFT, R, R2, R3, RIGHT, SELECT, START, UP, X, Y};
 use crate::pad_labels::{Family, CHOICES};
-use romp_proto::msg::PadState;
+use romlin_proto::msg::PadState;
 use serde::{Deserialize, Serialize};
 use slint::platform::Key;
 use std::collections::BTreeMap;

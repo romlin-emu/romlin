@@ -32,7 +32,7 @@ impl Controller {
         self.shared.rt.spawn(async move {
             match updates::latest(&http, updates::RELEASES, Platform::current()).await {
                 Ok(latest) => {
-                    tracing::info!(version = latest.version, "newest RomP release");
+                    tracing::info!(version = latest.version, "newest Romlin release");
                     let state = State {
                         checked_at: now(),
                         latest: Some(latest),
@@ -41,7 +41,7 @@ impl Controller {
                     store.lock().unwrap().set(STATE_KEY, &state.to_json());
                     on_ui(|c| c.show_update());
                 }
-                Err(e) => tracing::warn!("checking for a newer RomP: {e}"),
+                Err(e) => tracing::warn!("checking for a newer Romlin: {e}"),
             }
         });
     }

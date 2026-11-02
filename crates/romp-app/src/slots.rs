@@ -124,7 +124,7 @@ pub fn in_game_card(status: &crate::saves::InGameSaveStatus, now: SystemTime) ->
                 SystemTime::UNIX_EPOCH + Duration::from_secs(u64::try_from(other.at).unwrap_or(0));
             tr!("On RomM from {} · {}", other.emulator, when(at, now))
         }
-        ThisComputerOnly => tr!("On this computer only · pair RomP to sync it"),
+        ThisComputerOnly => tr!("On this computer only · pair Romlin to sync it"),
     };
     crate::SlotCard {
         slot: -1,

@@ -168,8 +168,10 @@ fn on_ui(f: impl FnOnce(&Rc<Controller>) + Send + 'static) {
 fn open_store() -> rusqlite::Result<Store> {
     let store = Store::open(&paths::db_path())?;
     let data = paths::data_dir();
-    let prefix = |dir: &Path| format!("{}/", dir.to_string_lossy());
-    store.rebase_local_paths(&prefix(&paths::legacy_data_dir(&data)), &prefix(&data));
+    let prefix = |dir: &Path| format!("{}{}", dir.to_string_lossy(), std::path::MAIN_SEPARATOR);
+    for legacy in paths::legacy_data_dirs(&data) {
+        store.rebase_local_paths(&prefix(&legacy), &prefix(&data));
+    }
     Ok(store)
 }
 
@@ -184,7 +186,7 @@ pub fn run(game_mode: bool) -> anyhow::Result<()> {
         downloads: Arc::new(Semaphore::new(PARALLEL_DOWNLOADS)),
         cores: Arc::new(Cores::new(paths::cores_dir())),
         http: reqwest::Client::builder()
-            .user_agent(concat!("Romp/", env!("CARGO_PKG_VERSION")))
+            .user_agent(concat!("Romlin/", env!("CARGO_PKG_VERSION")))
             .connect_timeout(Duration::from_secs(10))
             .read_timeout(Duration::from_secs(30))
             .build()?,
@@ -195,8 +197,6 @@ pub fn run(game_mode: bool) -> anyhow::Result<()> {
     );
     let prefs =
         crate::prefs::Preferences::from_json(shared.store.lock().unwrap().get("prefs").as_deref());
-    crate::i18n::apply(crate::i18n::pick(prefs.language));
-    ui.global::<crate::Locale>().set_rtl(crate::i18n::rtl());
     let placement = Placement::from_json(shared.store.lock().unwrap().get(WINDOW_KEY).as_deref());
     let last_view = LastView::from_json(shared.store.lock().unwrap().get(VIEW_KEY).as_deref());
     let mappings = crate::mapping::Mappings::from_json(

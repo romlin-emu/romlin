@@ -356,7 +356,7 @@ pub enum InGameSaveStatus {
     Waiting,
     /// Nothing here yet, but RomM has one, which comes down when the game starts.
     OnServer,
-    /// Nothing here and none of RomP's on RomM, but another emulator's that can be used.
+    /// Nothing here and none of Romlin's on RomM, but another emulator's that can be used.
     FromOtherEmulator(OtherSave),
     /// Save sync is off, so the save stays on this computer.
     ThisComputerOnly,
@@ -365,7 +365,7 @@ pub enum InGameSaveStatus {
 /// What RomM holds for a game's in-game save.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ServerSaves {
-    /// A save under RomP's emulator, which RomM offers when the game starts.
+    /// A save under Romlin's emulator, which RomM offers when the game starts.
     pub ours: bool,
     /// The newest save under another emulator, where saves carry over between emulators.
     pub other: Option<OtherSave>,
@@ -447,7 +447,7 @@ pub fn server_saves(
     }
 }
 
-/// Another emulator's save in the form RomP's emulator reads, or None when it can't be used.
+/// Another emulator's save in the form Romlin's emulator reads, or None when it can't be used.
 pub fn adapt_other_save(platform_slug: &str, bytes: Vec<u8>) -> Option<Vec<u8>> {
     if !SAVES_CARRY_OVER.contains(&platform_slug) || bytes.is_empty() {
         return None;
@@ -471,7 +471,7 @@ pub fn remember_outcome(
     }
 }
 
-/// The server's saves RomP would sync: RomM offers a device only those under its emulator.
+/// The server's saves Romlin would sync: RomM offers a device only those under its emulator.
 pub fn for_emulator(
     server: Vec<crate::romm::types::RemoteSave>,
     emulator: &str,
@@ -573,7 +573,7 @@ pub enum SramAction {
     Ask,
 }
 
-/// Decides from the save here, RomP's newest on RomM and the one last synced, all as content
+/// Decides from the save here, Romlin's newest on RomM and the one last synced, all as content
 /// hashes. RomM's save is `Some(None)` when RomM didn't say its hash.
 pub fn sram_action(
     here: Option<&str>,
@@ -591,7 +591,7 @@ pub fn sram_action(
     }
 }
 
-/// Syncs a game's in-game save with RomP's newest on RomM, given the one last synced.
+/// Syncs a game's in-game save with Romlin's newest on RomM, given the one last synced.
 pub async fn sync_sram(
     client: &Client,
     device_id: &str,
@@ -964,7 +964,7 @@ mod tests {
     }
 
     #[test]
-    fn only_saves_under_romps_emulator_are_ours() {
+    fn only_saves_under_romlins_emulator_are_ours() {
         let remote = |id, emulator: Option<&str>| crate::romm::types::RemoteSave {
             id,
             rom_id: 1813,
@@ -1356,13 +1356,13 @@ mod tests {
                    "updated_at": updated, "content_hash": "h", "emulator": "snes9x"})
         }
 
-        /// A save of RomP's on RomM, with this content hash.
+        /// A save of Romlin's on RomM, with this content hash.
         fn remote(id: i64, hash: &str, updated: &str) -> serde_json::Value {
             json!({"id": id, "rom_id": 5, "file_name": "Zelda [t].srm", "slot": "autosave",
                    "updated_at": updated, "content_hash": hash, "emulator": "snes9x"})
         }
 
-        /// A newer save from another emulator, which RomP's sync leaves alone.
+        /// A newer save from another emulator, which Romlin's sync leaves alone.
         fn other(id: i64, updated: &str) -> serde_json::Value {
             json!({"id": id, "rom_id": 5, "file_name": "Zelda.sav", "slot": "autosave",
                    "updated_at": updated, "content_hash": "other", "emulator": "bsnes"})
@@ -1466,7 +1466,7 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn a_save_only_on_romm_comes_down_the_newest_of_romps() {
+        async fn a_save_only_on_romm_comes_down_the_newest_of_romlins() {
             let server = MockServer::start().await;
             listed(
                 &server,

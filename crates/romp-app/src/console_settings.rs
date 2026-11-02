@@ -305,7 +305,7 @@ mod tests {
     fn every_resolution_choice_fits_the_frame_buffer() {
         for console in CONSOLES {
             let (max_w, max_h) = if console.vulkan {
-                (romp_proto::frame::MAX_W, romp_proto::frame::MAX_H)
+                (romlin_proto::frame::MAX_W, romlin_proto::frame::MAX_H)
             } else {
                 (1920, 1080)
             };

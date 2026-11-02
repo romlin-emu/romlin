@@ -1,8 +1,8 @@
 use anyhow::{anyhow, Context, Result};
-use romp_proto::frame::FrameReader;
-use romp_proto::msg::{AppMsg, RunnerMsg};
-use romp_proto::socket::{UnixListener, UnixStream};
-use romp_proto::wire;
+use romlin_proto::frame::FrameReader;
+use romlin_proto::msg::{AppMsg, RunnerMsg};
+use romlin_proto::socket::{UnixListener, UnixStream};
+use romlin_proto::wire;
 use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::io::{BufRead, BufReader};
@@ -98,9 +98,9 @@ impl Session {
             .map_or_else(String::new, |s| s.to_string_lossy().into_owned());
         tracing::info!("{}", crate::logs::game_started(&cfg.title, &core));
         let id = unique_id();
-        let frames_name = format!("/romp-{id}");
+        let frames_name = format!("/romlin-{id}");
         let frames = FrameReader::create(&frames_name).context("create frame buffer")?;
-        let socket = std::env::temp_dir().join(format!("romp-{id}.sock"));
+        let socket = std::env::temp_dir().join(format!("romlin-{id}.sock"));
         let listener = UnixListener::bind(&socket).context("bind runner socket")?;
         listener.set_nonblocking(true)?;
         let mut command = Command::new(&cfg.runner);
@@ -292,7 +292,7 @@ mod tests {
         cfg.jit = true;
         cfg.load_slot = Some(2);
         cfg.options = vec![("puae_kickstart".into(), "auto".into())];
-        let args = runner_args(&cfg, Path::new("/tmp/c.sock"), "/romp-1");
+        let args = runner_args(&cfg, Path::new("/tmp/c.sock"), "/romlin-1");
         let expected: Vec<OsString> = [
             "--core",
             "/cores/snes9x_libretro.dylib",
@@ -305,7 +305,7 @@ mod tests {
             "--socket",
             "/tmp/c.sock",
             "--frames",
-            "/romp-1",
+            "/romlin-1",
             "--load-slot",
             "2",
             "--jit",
@@ -322,7 +322,7 @@ mod tests {
     fn automatic_saves_can_be_turned_off() {
         let mut cfg = config("/bin/runner".into());
         let has_flag = |cfg: &SessionConfig| {
-            runner_args(cfg, Path::new("/tmp/c.sock"), "/romp-1")
+            runner_args(cfg, Path::new("/tmp/c.sock"), "/romlin-1")
                 .iter()
                 .any(|a| a == "--no-auto-state")
         };
@@ -335,7 +335,7 @@ mod tests {
     fn lowered_volume_is_passed_to_the_runner() {
         let mut cfg = config("/bin/runner".into());
         let volume = |cfg: &SessionConfig| {
-            let args = runner_args(cfg, Path::new("/tmp/c.sock"), "/romp-1");
+            let args = runner_args(cfg, Path::new("/tmp/c.sock"), "/romlin-1");
             args.iter()
                 .position(|a| a == "--volume")
                 .map(|i| args[i + 1].clone())
@@ -379,9 +379,9 @@ mod tests {
 
     #[test]
     fn start_fails_cleanly_for_missing_runner() {
-        let err = Session::start(&config("/nonexistent/romp-runner".into()))
+        let err = Session::start(&config("/nonexistent/romlin-runner".into()))
             .err()
             .unwrap();
-        assert!(format!("{err:#}").contains("/nonexistent/romp-runner"));
+        assert!(format!("{err:#}").contains("/nonexistent/romlin-runner"));
     }
 }

@@ -1,4 +1,4 @@
-//! The text frames of Socket.IO 5 over an Engine.IO 4 WebSocket: just what RomP's device
+//! The text frames of Socket.IO 5 over an Engine.IO 4 WebSocket: just what Romlin's device
 //! connection needs.
 use serde_json::Value;
 

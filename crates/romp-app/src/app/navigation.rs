@@ -494,7 +494,7 @@ mod tests {
         window.draw_if_needed(|renderer| {
             let mut pixels = vec![slint::Rgb8Pixel::default(); 800 * 400];
             renderer.render(&mut pixels, 800);
-            if let Some(path) = std::env::var_os("ROMP_TEXTURE_UI_CAPTURE") {
+            if let Some(path) = std::env::var_os("ROMLIN_TEXTURE_UI_CAPTURE") {
                 let rgb: Vec<u8> = pixels.iter().flat_map(|p| [p.r, p.g, p.b]).collect();
                 image::save_buffer(path, &rgb, 800, 400, image::ColorType::Rgb8).unwrap();
             }

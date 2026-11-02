@@ -1,4 +1,4 @@
-use romp_libretro::{
+use romlin_libretro::{
     HwContextProvider, RETRO_HW_CONTEXT_OPENGL, RETRO_HW_CONTEXT_OPENGLES2,
     RETRO_HW_CONTEXT_OPENGLES3, RETRO_HW_CONTEXT_OPENGL_CORE,
 };

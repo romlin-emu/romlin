@@ -23,6 +23,7 @@ pub struct Keychain {
     service: &'static str,
 }
 
+// Keep the upstream service IDs so existing sign-ins remain available after the rename.
 impl Keychain {
     pub fn retro_achievements() -> Keychain {
         Keychain {
@@ -130,7 +131,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn unavailable_store_reports_its_initialization_error() {
-        const CHILD: &str = "ROMP_TEST_KEYRING_FAILURE";
+        const CHILD: &str = "ROMLIN_TEST_KEYRING_FAILURE";
         if std::env::var_os(CHILD).is_some() {
             tracing_subscriber::fmt()
                 .without_time()
@@ -140,7 +141,7 @@ mod tests {
             let tokens = Keychain::app();
             assert_eq!(tokens.load("https://debug.invalid/"), None);
             let error = tokens
-                .save("https://debug.invalid/", "ROMP_TEST_SECRET")
+                .save("https://debug.invalid/", "ROMLIN_TEST_SECRET")
                 .unwrap_err();
             let cause = keyring::Entry::store_status().as_ref().unwrap_err();
             assert!(error.contains(&cause.to_string()), "{error}");
@@ -164,7 +165,7 @@ mod tests {
         assert!(log.contains("could not store saved sign-in"), "{log}");
         assert!(log.contains("Platform failure:"), "{log}");
         assert!(!log.contains("No default store has been set"), "{log}");
-        assert!(!log.contains("ROMP_TEST_SECRET"), "{log}");
+        assert!(!log.contains("ROMLIN_TEST_SECRET"), "{log}");
     }
 
     #[test]

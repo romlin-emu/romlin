@@ -5206,7 +5206,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "romp-app"
+name = "romlin-app"
 version = "0.19.0"
 dependencies = [
  "anyhow",
@@ -5230,9 +5230,8 @@ dependencies = [
  "qrcode",
  "reqwest",
  "rfd",
- "romp-cheevos",
- "romp-proto",
- "rspolib",
+ "romlin-cheevos",
+ "romlin-proto",
  "rusqlite",
  "rustls",
  "rustls-platform-verifier",
@@ -5245,7 +5244,6 @@ dependencies = [
  "sha2",
  "slint",
  "slint-build",
- "sys-locale",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
@@ -5262,16 +5260,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "romp-cheevos"
+name = "romlin-cheevos"
 version = "0.19.0"
 dependencies = [
  "cc",
  "md-5",
- "romp-proto",
+ "romlin-proto",
 ]
 
 [[package]]
-name = "romp-libretro"
+name = "romlin-libretro"
 version = "0.19.0"
 dependencies = [
  "cc",
@@ -5281,7 +5279,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "romp-proto"
+name = "romlin-proto"
 version = "0.19.0"
 dependencies = [
  "libc",
@@ -5292,7 +5290,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "romp-runner"
+name = "romlin-runner"
 version = "0.19.0"
 dependencies = [
  "anyhow",
@@ -5304,9 +5302,9 @@ dependencies = [
  "libc",
  "parking_lot",
  "ringbuf",
- "romp-cheevos",
- "romp-libretro",
- "romp-proto",
+ "romlin-cheevos",
+ "romlin-libretro",
+ "romlin-proto",
  "sevenz-rust2",
  "tempfile",
  "tracing",
@@ -6719,9 +6717,6 @@ name = "tr"
 version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "79d30c7e79732253d80e9d619007002c8f3a362b0816e37340af648d4e2c6092"
-dependencies = [
- "rspolib",
-]
 
 [[package]]
 name = "tracing"

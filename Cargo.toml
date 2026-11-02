@@ -6,7 +6,7 @@ members = ["crates/*"]
 version = "0.19.0"
 edition = "2021"
 license = "GPL-3.0-or-later"
-repository = "https://github.com/RompEmu/RomP"
+repository = "https://github.com/romlin-emu/romlin"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "warn"
@@ -18,9 +18,9 @@ redundant_closure_for_method_calls = "warn"
 uninlined_format_args = "warn"
 
 [workspace.dependencies]
-romp-cheevos = { path = "crates/romp-cheevos" }
-romp-libretro = { path = "crates/romp-libretro" }
-romp-proto = { path = "crates/romp-proto" }
+romlin-cheevos = { path = "crates/romp-cheevos" }
+romlin-libretro = { path = "crates/romp-libretro" }
+romlin-proto = { path = "crates/romp-proto" }
 
 [profile.dev]
 debug = "line-tables-only"
