@@ -62,7 +62,7 @@ $(call checksum,$(MACOS_ZIP))
 endef
 
 .PHONY: build app appimage packages glibc-check dist dist-macos dist-linux dist-windows clean
-.PHONY: check fmt-check clippy test deny machete typos workflows release-notes update-rcheevos
+.PHONY: check fmt-check clippy test deny machete typos workflows release-notes release-check update-rcheevos
 
 build:
 	cargo build --release --locked
@@ -181,19 +181,19 @@ dist-windows: build
 clean:
 	rm -rf $(DIST)
 
-check: fmt-check clippy test deny machete typos workflows
+check: fmt-check clippy test deny machete typos workflows release-check
 
 fmt-check:
 	cargo fmt --all --check
 
 clippy:
-	CARGO_INCREMENTAL=0 cargo clippy --workspace --all-targets --locked -- -D warnings
+	CARGO_INCREMENTAL=0 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 
 test:
-	CARGO_INCREMENTAL=0 cargo test --workspace --locked
+	CARGO_INCREMENTAL=0 cargo test --workspace --all-features --locked
 
 deny:
-	cargo deny check
+	cargo deny --all-features check
 
 machete:
 	cargo machete
@@ -206,10 +206,12 @@ workflows:
 	zizmor .github
 
 release-notes:
-	@awk -v heading="## [$(VERSION)]" ' \
-		index($$0, "## [") == 1 { if (found) exit; found = index($$0, heading) == 1; next } \
-		found && (printed || NF) { print; printed = 1 } \
-		END { if (!printed) { print "No changelog entry for $(VERSION)" > "/dev/stderr"; exit 1 } }' CHANGELOG.md
+	@python3 .github/release/release.py notes "$(VERSION)"
+
+# NODE_PATH points at a temporary install of release-please 17.6.0; see docs/releasing.md.
+release-check:
+	python3 -m unittest discover -s .github/release -v
+	node .github/release/preview.cjs
 
 RCHEEVOS_DIR := crates/romp-cheevos/rcheevos
 # Only RAIntegration on Windows and external clients use these, and Romlin builds neither.

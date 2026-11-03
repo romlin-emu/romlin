@@ -4,22 +4,44 @@ name: Smoke test
 # publishing; running it by hand builds the packages first.
 on:
   workflow_call:
+    inputs:
+      ref:
+        type: string
+        default: ""
+      build:
+        type: boolean
+        default: false
+      version:
+        type: string
+        default: smoke
   workflow_dispatch:
+    inputs:
+      ref:
+        type: string
+        default: ""
+      build:
+        description: Build packages before testing
+        type: boolean
+        default: true
+      version:
+        type: string
+        default: smoke
 
 permissions: {}
 
 jobs:
   build:
-    if: github.event_name == 'workflow_dispatch'
+    if: inputs.build
     uses: ./.github/workflows/build.yml
     permissions:
       contents: read
     with:
-      version: smoke
+      version: ${{ inputs.version }}
+      ref: ${{ inputs.ref || github.sha }}
 
   smoke:
     needs: build
-    if: ${{ !cancelled() && needs.build.result != 'failure' }}
+    if: ${{ !cancelled() && (needs.build.result == 'success' || (!inputs.build && needs.build.result == 'skipped')) }}
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     container: ${{ matrix.container }}
@@ -75,6 +97,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ inputs.ref || github.sha }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: romlin-${{ runner.os }}
@@ -190,6 +213,10 @@ jobs:
                 url="https://github.com/romlin-emu/fake-08/releases/latest/download/fake08_libretro-$target.zip"
               fi
               curl -fsSL -o core.zip "$url"
+              if [ "$core" = fake08 ]; then
+                curl -fsSL -o core.zip.sha256 "$url.sha256"
+                "$python" -c 'import hashlib, pathlib; expected = pathlib.Path("core.zip.sha256").read_text().split()[0]; actual = hashlib.sha256(pathlib.Path("core.zip").read_bytes()).hexdigest(); assert actual == expected, "FAKE-08 checksum mismatch"'
+              fi
               "$python" -m zipfile -e core.zip cores
             fi
             name="$core-${game%.*}"
