@@ -110,6 +110,7 @@ const {ReleasePleaseManifest} = require('release-please/build/src/updaters/relea
   }
   assert.equal(release.concurrency['cancel-in-progress'], false);
   assert.equal(nightly.jobs.publish.concurrency['cancel-in-progress'], false);
+  for (const job of ['ci', 'build']) assert.equal(nightly.jobs[job].concurrency['cancel-in-progress'], true);
   assert.deepEqual(nightly.jobs.publish.needs, ['ci', 'build']);
   assert.equal(nightly.jobs.ci.with.ref, '${{ github.sha }}');
   assert.deepEqual(release.jobs.publish.needs, ['prepare', 'release-ci', 'build', 'smoke']);

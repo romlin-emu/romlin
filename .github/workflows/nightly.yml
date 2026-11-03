@@ -3,12 +3,19 @@ name: Nightly
 on:
   push:
     branches: [main]
+    # Documentation alone changes nothing CI checks.
+    paths-ignore: ['**/*.md', 'docs/**', 'LICENSE*']
   workflow_dispatch:
 
 permissions: {}
 
 jobs:
+  # A newer push supersedes this nightly: cancel its checks and builds, which
+  # also skips its publication. Publication itself is never cancelled midway.
   ci:
+    concurrency:
+      group: nightly-ci-${{ github.ref }}
+      cancel-in-progress: true
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
@@ -16,6 +23,9 @@ jobs:
       ref: ${{ github.sha }}
 
   build:
+    concurrency:
+      group: nightly-build-${{ github.ref }}
+      cancel-in-progress: true
     uses: ./.github/workflows/build.yml
     permissions:
       contents: read
