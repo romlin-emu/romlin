@@ -7,6 +7,8 @@ on:
         type: string
         default: ""
   pull_request:
+    # Documentation alone changes nothing CI checks.
+    paths-ignore: ['**/*.md', 'docs/**', 'LICENSE*']
   workflow_dispatch:
 
 permissions:

@@ -47,9 +47,11 @@ commits containing this release tooling; historical tags predating it cannot be
 rebuilt through the new workflow without backporting the tooling.
 
 Nightlies continue on every main push and manual run, with exact-source CI required
-before publication. Main push CI runs once through Nightly. Only the publication job
-is serialized with automatic cancellation disabled so a newer run cannot interrupt
-its delete/create sequence. Every push still builds and checks. GitHub concurrency
+before publication. Main push CI runs once through Nightly. A newer push cancels
+the checks and builds of the nightly it supersedes, which also skips that run's
+publication; pushes and PRs that change only Markdown, `docs/` or licenses run no
+CI or nightly. The publication job is serialized with automatic cancellation
+disabled so a newer run cannot interrupt its delete/create sequence. GitHub concurrency
 retains at most one pending publication; nightly is a rolling channel, so superseded
 pending publications can still be coalesced. Publication requires the main branch
 and rechecks its current commit before replacement, so an older build finishing
