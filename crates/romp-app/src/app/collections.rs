@@ -655,10 +655,11 @@ impl Controller {
     }
 
     pub(super) fn dialog_accepted(&self, value: String) {
-        let Some(action) = self.dialog.borrow_mut().take() else {
+        let action = self.dialog.borrow_mut().take();
+        self.close_dialog();
+        let Some(action) = action else {
             return;
         };
-        self.close_dialog();
         let name = value.trim().to_string();
         match action {
             DialogAction::Create { add_game } if !name.is_empty() => {

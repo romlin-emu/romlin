@@ -50,7 +50,8 @@ pub fn emulator(dir: PathBuf) -> Emulator {
 pub async fn install(emulator: &Emulator, http: &reqwest::Client) -> Result<PathBuf, String> {
     let (name, hash) =
         download().ok_or_else(|| "Eden has no download for this computer".to_string())?;
-    emulator
+    migrate_users(&emulator.dir)?;
+    let exe = emulator
         .install_asset(
             http,
             VERSION,
@@ -60,7 +61,8 @@ pub async fn install(emulator: &Emulator, http: &reqwest::Client) -> Result<Path
                 digest: Some(format!("sha256:{hash}")),
             },
         )
-        .await
+        .await?;
+    ready(exe)
 }
 
 pub fn missing(source: &Path) -> Vec<String> {
@@ -146,12 +148,209 @@ fn valid_keys(text: &str) -> bool {
     count > 0
 }
 
+pub fn user_dir(exe: &Path) -> PathBuf {
+    let dir = exe.parent().expect("installed executable has a parent");
+    let version = if dir.file_name().is_some_and(|n| n == "squashfs-root") {
+        dir.parent().expect("AppImage has a version directory")
+    } else {
+        dir
+    };
+    #[cfg(windows)]
+    if version.file_name().is_some_and(|n| n == "runtime") {
+        return version.join("user");
+    }
+    let root = version.parent().expect("Eden has an install directory");
+    if cfg!(windows) {
+        root.join("runtime/user")
+    } else {
+        root.join("user")
+    }
+}
+
+// Copy missing files atomically and retain the source until the whole migration succeeds.
+fn merge_user(source: &Path, target: &Path) -> std::io::Result<()> {
+    if !source.exists() {
+        return Ok(());
+    }
+    let metadata = source.symlink_metadata()?;
+    if !metadata.is_dir() && !metadata.is_file() {
+        return Err(std::io::Error::other(
+            "Eden user data contains a link or unsupported file type",
+        ));
+    }
+    if source.is_dir() {
+        std::fs::create_dir_all(target)?;
+        for entry in std::fs::read_dir(source)? {
+            let entry = entry?;
+            merge_user(&entry.path(), &target.join(entry.file_name()))?;
+        }
+    } else if !target.exists() {
+        let mut temp = tempfile::NamedTempFile::new_in(target.parent().unwrap())?;
+        std::io::copy(&mut std::fs::File::open(source)?, &mut temp)?;
+        temp.as_file().sync_all()?;
+        match temp.persist_noclobber(target) {
+            Ok(_) => {}
+            Err(e) if e.error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e.error),
+        }
+    }
+    Ok(())
+}
+
+fn migrate_users(root: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(root).map_err(|e| e.to_string())?;
+    let target = if cfg!(windows) {
+        root.join("runtime/user")
+    } else {
+        root.join("user")
+    };
+    let mut versions = std::fs::read_dir(root)
+        .map_err(|e| e.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| e.to_string())?;
+    versions.sort_by_key(|entry| {
+        std::cmp::Reverse(firmware_version(&entry.file_name().to_string_lossy()))
+    });
+    for entry in versions {
+        if !entry.file_name().to_string_lossy().starts_with('v') {
+            continue;
+        }
+        let source = entry.path().join("user");
+        if !source.exists() {
+            continue;
+        }
+        let backups = root.join("legacy-users");
+        std::fs::create_dir_all(&backups).map_err(|e| e.to_string())?;
+        let backup = backups.join(entry.file_name());
+        if backup.exists() {
+            return Err("An Eden user migration backup already exists".into());
+        }
+        merge_user(&source, &target).map_err(|e| e.to_string())?;
+        std::fs::rename(&source, backup).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Upgrade an existing AppImage once, without FUSE or per-launch extraction.
+pub fn ready(exe: PathBuf) -> Result<PathBuf, String> {
+    let parent = exe.parent().ok_or("Missing Eden directory")?;
+    let version = if parent.file_name().is_some_and(|n| n == "squashfs-root") {
+        parent.parent().unwrap()
+    } else {
+        parent
+    };
+    let root = version
+        .parent()
+        .ok_or("Missing Eden install directory")?
+        .to_path_buf();
+    migrate_users(&root)?;
+    #[cfg(target_os = "linux")]
+    if exe.extension().is_some_and(|ext| ext == "AppImage") {
+        let version = exe.parent().unwrap();
+        let extracted = version.join("squashfs-root");
+        if !extracted.join("AppRun").is_file() {
+            let stage = tempfile::tempdir_in(version).map_err(|e| e.to_string())?;
+            let output = std::process::Command::new(&exe)
+                .arg("--appimage-extract")
+                .current_dir(stage.path())
+                .env_remove("APPIMAGE_EXTRACT_AND_RUN")
+                .output()
+                .map_err(|e| e.to_string())?;
+            if !output.status.success() {
+                return Err(format!(
+                    "Could not extract Eden: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                ));
+            }
+            // Eden's uruntime extracts squashfs-root as a link to AppDir.
+            let tree = stage
+                .path()
+                .join("squashfs-root")
+                .canonicalize()
+                .map_err(|e| e.to_string())?;
+            std::fs::rename(tree, &extracted).map_err(|e| e.to_string())?;
+        }
+        return Ok(extracted.join("AppRun"));
+    }
+    #[cfg(windows)]
+    {
+        let runtime = root.join("runtime");
+        if exe.parent() == Some(runtime.as_path()) {
+            return Ok(exe);
+        }
+        prepare_runtime(version, &runtime)?;
+        return Ok(runtime.join("eden.exe"));
+    }
+    #[cfg(not(windows))]
+    Ok(exe)
+}
+
+#[cfg(windows)]
+fn prepare_runtime(source: &Path, runtime: &Path) -> Result<(), String> {
+    let version = source
+        .file_name()
+        .ok_or("Missing Eden version")?
+        .to_string_lossy();
+    let marker = runtime.join("romlin-version");
+    if runtime.join("eden.exe").is_file()
+        && std::fs::read_to_string(&marker).ok().as_deref() == Some(version.as_ref())
+    {
+        return Ok(());
+    }
+    let stage = tempfile::tempdir_in(runtime.parent().ok_or("Missing Eden directory")?)
+        .map_err(|e| e.to_string())?;
+    for entry in std::fs::read_dir(source).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if entry.file_name() == "user" {
+            continue;
+        }
+        copy_runtime(&entry.path(), &stage.path().join(entry.file_name()))
+            .map_err(|e| e.to_string())?;
+    }
+    if !stage.path().join("eden.exe").is_file() {
+        return Err("Eden runtime has no executable".into());
+    }
+    std::fs::create_dir_all(runtime).map_err(|e| e.to_string())?;
+    // Keep portable data while removing files no longer shipped by the new version.
+    for entry in std::fs::read_dir(runtime).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        if entry.file_name() == "user" {
+            continue;
+        }
+        if entry.file_type().map_err(|e| e.to_string())?.is_dir() {
+            std::fs::remove_dir_all(entry.path())
+        } else {
+            std::fs::remove_file(entry.path())
+        }
+        .map_err(|e| e.to_string())?;
+    }
+    for entry in std::fs::read_dir(stage.path()).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        std::fs::rename(entry.path(), runtime.join(entry.file_name()))
+            .map_err(|e| e.to_string())?;
+    }
+    crate::saves::replace_file(&marker, version.as_bytes()).map_err(|e| e.to_string())
+}
+
+#[cfg(windows)]
+fn copy_runtime(source: &Path, target: &Path) -> std::io::Result<()> {
+    if source.is_dir() {
+        std::fs::create_dir_all(target)?;
+        for entry in std::fs::read_dir(source)? {
+            let entry = entry?;
+            copy_runtime(&entry.path(), &target.join(entry.file_name()))?;
+        }
+    } else {
+        let mut temp = tempfile::NamedTempFile::new_in(target.parent().unwrap())?;
+        std::io::copy(&mut std::fs::File::open(source)?, &mut temp)?;
+        temp.persist(target).map_err(|e| e.error)?;
+    }
+    Ok(())
+}
+
 /// Portable mode keeps Eden's keys, firmware and saves separate from any existing Eden installation.
 pub fn prepare(exe: &Path, source: &Path) -> Result<(), String> {
-    let home = exe
-        .parent()
-        .ok_or("Eden has no parent directory")?
-        .join("user");
+    let home = user_dir(exe);
     let keys = home.join("keys");
     std::fs::create_dir_all(&keys).map_err(|e| e.to_string())?;
     #[cfg(unix)]
@@ -282,12 +481,25 @@ pub fn launch(
     exe: &Path,
     rom: &Path,
     fullscreen: bool,
+    steam_virtual: bool,
     on_exit: impl FnOnce(Option<i32>, Vec<String>) + Send + 'static,
 ) -> std::io::Result<Running> {
     let mut command = std::process::Command::new(exe);
-    command.current_dir(exe.parent().expect("installed executable has a parent"));
-    #[cfg(target_os = "linux")]
-    command.env("APPIMAGE_EXTRACT_AND_RUN", "1");
+    let home = user_dir(exe);
+    std::fs::create_dir_all(&home)?;
+    command.current_dir(home.parent().unwrap());
+    #[cfg(windows)]
+    command.current_dir(exe.parent().unwrap());
+    command.env_remove("APPIMAGE_EXTRACT_AND_RUN");
+    command.env_remove("APPIMAGE");
+    command.env_remove("ARGV0");
+    if steam_virtual {
+        let ignored = std::env::var("SDL_GAMECONTROLLER_IGNORE_DEVICES").unwrap_or_default();
+        command.env(
+            "SDL_GAMECONTROLLER_IGNORE_DEVICES",
+            format!("{ignored},0x28de/0x1205"),
+        );
+    }
     if fullscreen {
         command.arg("-f");
     }
@@ -299,6 +511,97 @@ pub fn launch(
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[cfg(windows)]
+    #[test]
+    fn runtime_is_cached_by_version_and_updates_remove_stale_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let v1 = dir.path().join("v1");
+        let v2 = dir.path().join("v2");
+        let runtime = dir.path().join("runtime");
+        std::fs::create_dir_all(&v1).unwrap();
+        std::fs::create_dir_all(&v2).unwrap();
+        std::fs::write(v1.join("eden.exe"), b"v1").unwrap();
+        std::fs::write(v1.join("old.dll"), b"old").unwrap();
+        std::fs::write(v2.join("eden.exe"), b"v2").unwrap();
+        std::fs::create_dir_all(runtime.join("user")).unwrap();
+        std::fs::write(runtime.join("user/save"), b"keep").unwrap();
+        prepare_runtime(&v1, &runtime).unwrap();
+        std::fs::write(v1.join("eden.exe"), b"must not recopy").unwrap();
+        prepare_runtime(&v1, &runtime).unwrap();
+        assert_eq!(std::fs::read(runtime.join("eden.exe")).unwrap(), b"v1");
+        prepare_runtime(&v2, &runtime).unwrap();
+        assert_eq!(std::fs::read(runtime.join("eden.exe")).unwrap(), b"v2");
+        assert!(!runtime.join("old.dll").exists());
+        assert_eq!(
+            std::fs::read_to_string(runtime.join("romlin-version")).unwrap(),
+            "v2"
+        );
+        assert_eq!(std::fs::read(runtime.join("user/save")).unwrap(), b"keep");
+        let bad = dir.path().join("v3");
+        std::fs::create_dir(&bad).unwrap();
+        assert!(prepare_runtime(&bad, &runtime).is_err());
+        assert_eq!(
+            std::fs::read_to_string(runtime.join("romlin-version")).unwrap(),
+            "v2"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn extracts_once_including_uruntimes_appdir_link() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("v1/eden.AppImage");
+        std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
+        std::fs::write(&exe, "#!/bin/sh\nmkdir AppDir\nprintf '#!/bin/sh\\nexit 0\\n' > AppDir/AppRun\nchmod +x AppDir/AppRun\nln -s AppDir squashfs-root\n").unwrap();
+        std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let extracted = ready(exe.clone()).unwrap();
+        assert!(extracted.is_file());
+        assert_eq!(user_dir(&extracted), user_dir(&exe));
+        std::fs::write(&exe, "broken executable").unwrap();
+        assert_eq!(ready(exe).unwrap(), extracted);
+    }
+
+    #[test]
+    fn migrates_without_overwriting_and_keeps_backups_outside_versions() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("v0.2.0/user");
+        std::fs::create_dir_all(old.join("nand/user/save")).unwrap();
+        std::fs::write(old.join("nand/user/save/progress"), b"save").unwrap();
+        std::fs::write(old.join("settings"), b"old").unwrap();
+        let home = user_dir(&dir.path().join("v0.2.1/eden"));
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join("settings"), b"new").unwrap();
+        migrate_users(dir.path()).unwrap();
+        assert_eq!(std::fs::read(home.join("settings")).unwrap(), b"new");
+        assert_eq!(
+            std::fs::read(home.join("nand/user/save/progress")).unwrap(),
+            b"save"
+        );
+        assert_eq!(
+            std::fs::read(dir.path().join("legacy-users/v0.2.0/settings")).unwrap(),
+            b"old"
+        );
+        std::fs::remove_dir_all(dir.path().join("v0.2.0")).unwrap();
+        migrate_users(dir.path()).unwrap();
+        assert_eq!(
+            std::fs::read(home.join("nand/user/save/progress")).unwrap(),
+            b"save"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_migration_retains_original_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("v1/user");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::write(old.join("save"), b"keep").unwrap();
+        std::os::unix::fs::symlink("save", old.join("link")).unwrap();
+        assert!(migrate_users(dir.path()).is_err());
+        assert_eq!(std::fs::read(old.join("save")).unwrap(), b"keep");
+    }
 
     fn firmware(name: &str, data: &[u8]) -> Vec<u8> {
         let mut zip = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
@@ -313,7 +616,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let source = dir.path().join("source");
         std::fs::create_dir(&source).unwrap();
-        let exe = dir.path().join("eden");
+        let exe = dir.path().join("v1/eden");
         std::fs::write(source.join("prod.keys"), "master_key_00 = 0123abcd").unwrap();
         std::fs::write(source.join("title.keys"), "abcd = 0123abcd").unwrap();
         std::fs::write(
@@ -322,7 +625,7 @@ mod tests {
         )
         .unwrap();
         prepare(&exe, &source).unwrap();
-        let home = dir.path().join("user");
+        let home = user_dir(&exe);
         assert_eq!(
             std::fs::read_to_string(home.join("keys/prod.keys")).unwrap(),
             "master_key_00 = 0123abcd"
@@ -342,13 +645,20 @@ mod tests {
     fn launches_the_game_in_portable_mode_with_fullscreen() {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
-        let exe = dir.path().join("eden");
+        let exe = dir.path().join("v1/eden");
+        std::fs::create_dir_all(exe.parent().unwrap()).unwrap();
         std::fs::write(&exe, "#!/bin/sh\nprintf '%s\\n' \"$PWD\" \"$@\" > args\n").unwrap();
         std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap();
         let (tx, rx) = std::sync::mpsc::channel();
-        let _running = launch(&exe, Path::new("/roms/a game.nsp"), true, move |code, _| {
-            tx.send(code).unwrap();
-        })
+        let _running = launch(
+            &exe,
+            Path::new("/roms/a game.nsp"),
+            true,
+            false,
+            move |code, _| {
+                tx.send(code).unwrap();
+            },
+        )
         .unwrap();
         assert_eq!(
             rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),
@@ -416,11 +726,10 @@ mod tests {
         let archive = firmware(name, b"versioned");
         std::fs::write(source.join("Firmware.18.0.1.zip"), &archive).unwrap();
         assert!(missing(&source).is_empty());
-        let exe = dir.path().join("eden");
+        let exe = dir.path().join("v1/eden");
         prepare(&exe, &source).unwrap();
-        let installed = dir
-            .path()
-            .join("user/nand/system/Contents/registered")
+        let installed = user_dir(&exe)
+            .join("nand/system/Contents/registered")
             .join(name);
         assert_eq!(std::fs::read(&installed).unwrap(), b"versioned");
         for version in ["9.0.0", "19.0.0", "19.0.10", "19.0.2"] {

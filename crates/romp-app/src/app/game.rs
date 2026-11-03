@@ -868,7 +868,9 @@ impl Controller {
                 with_controller(|c| c.external_closed(id, "xemu", code, log));
             });
         };
-        match xemu::launch(&exe, &config_path, &rom, prefs.fullscreen, on_exit) {
+        match self
+            .launch_external(|| xemu::launch(&exe, &config_path, &rom, prefs.fullscreen, on_exit))
+        {
             Ok(running) => {
                 *self.running.borrow_mut() = Some(play::RunningGame::External(running));
                 self.game_status(detail.id, String::new());
@@ -922,6 +924,7 @@ impl Controller {
                 }
                 let dir = game.dir.clone();
                 tokio::task::spawn_blocking(move || {
+                    let exe = eden::ready(exe)?;
                     eden::prepare(&exe, &system.join("eden"))?;
                     eden::saves::capture_after_play(&exe, &dir).map_err(|e| e.to_string())?;
                     Ok(exe)
@@ -966,11 +969,19 @@ impl Controller {
         gamepads.poll();
         let controllers = gamepads.sdl_controllers();
         drop(gamepads);
-        if let Err(e) = eden::input::prepare(&exe, &controllers) {
-            return self.game_status(
-                detail.id,
-                tr!("Could not write {name}'s settings: {e}", name = "Eden", e),
-            );
+        let input = match eden::input::prepare(&exe, &controllers) {
+            Ok(input) => input,
+            Err(e) => {
+                self.external_notice(tr!(
+                    "Could not write {name}'s settings: {e}",
+                    name = "Eden",
+                    e
+                ));
+                return self.game_status(detail.id, e.to_string());
+            }
+        };
+        if input.missing {
+            self.external_notice(tr!("Eden has no usable mapping for one or more controllers. Connect a controller and check Steam Input's gamepad layout."));
         }
         let id = detail.id;
         let save_dir = paths::game_save_dir(&paths::data_dir(), &self.server(), id);
@@ -983,7 +994,15 @@ impl Controller {
                 with_controller(|c| c.external_closed(id, "Eden", code, log));
             });
         };
-        match eden::launch(&exe, &rom, self.prefs.get().fullscreen, on_exit) {
+        match self.launch_external(|| {
+            eden::launch(
+                &exe,
+                &rom,
+                self.prefs.get().for_game_mode(self.game_mode).fullscreen,
+                input.steam_virtual,
+                on_exit,
+            )
+        }) {
             Ok(running) => {
                 *self.running.borrow_mut() = Some(play::RunningGame::External(running));
                 self.game_status(detail.id, String::new());
@@ -1110,7 +1129,9 @@ impl Controller {
                 with_controller(|c| c.external_closed(id, "RPCS3", code, log));
             });
         };
-        match rpcs3::launch(&exe, &home, &config_path, &boot, prefs.fullscreen, on_exit) {
+        match self.launch_external(|| {
+            rpcs3::launch(&exe, &home, &config_path, &boot, prefs.fullscreen, on_exit)
+        }) {
             Ok(running) => {
                 *self.running.borrow_mut() = Some(play::RunningGame::External(running));
                 self.game_status(detail.id, String::new());
@@ -1124,7 +1145,32 @@ impl Controller {
         }
     }
 
+    fn external_notice(&self, text: String) {
+        if let Some(ui) = self.ui() {
+            ui.set_dialog_title(tr!("Eden controllers").into());
+            ui.set_dialog_message(text.into());
+            ui.set_dialog_asks_name(false);
+            ui.set_dialog_confirm(tr!("OK").into());
+            ui.set_dialog_destructive(false);
+            self.dialog.borrow_mut().take();
+            ui.set_dialog_open(true);
+        }
+    }
+
+    fn launch_external(
+        &self,
+        launch: impl FnOnce() -> std::io::Result<crate::external::Running>,
+    ) -> std::io::Result<crate::external::Running> {
+        self.gamepads.borrow_mut().suspend();
+        let result = launch();
+        if result.is_err() {
+            self.gamepads.borrow_mut().resume();
+        }
+        result
+    }
+
     fn external_closed(&self, id: i64, name: &str, code: Option<i32>, log: Vec<String>) {
+        self.gamepads.borrow_mut().resume();
         self.game_closed(None);
         if code != Some(0) {
             let detail = log.last().cloned().unwrap_or_default();

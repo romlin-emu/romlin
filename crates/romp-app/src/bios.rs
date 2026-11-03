@@ -856,12 +856,12 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
-        let exe = dir.path().join("emulator/eden");
+        let exe = dir.path().join("emulator/v1/eden");
         crate::eden::prepare(&exe, &source).unwrap();
         assert_eq!(
             std::fs::read(
-                dir.path()
-                    .join("emulator/user/nand/system/Contents/registered")
+                crate::eden::user_dir(&exe)
+                    .join("nand/system/Contents/registered")
                     .join(name)
             )
             .unwrap(),
