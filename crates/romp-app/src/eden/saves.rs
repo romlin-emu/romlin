@@ -155,10 +155,7 @@ const ACCOUNT: &str = "system/save/8000000000000010";
 pub fn capture_after_play(exe: &Path, dir: &Path) -> io::Result<()> {
     // Eden constructs its account manager before reading the configured NAND path.
     if dir.join(NAND).join("user/save").exists() {
-        let portable = exe
-            .parent()
-            .ok_or_else(|| invalid("Missing Eden directory"))?
-            .join("user/nand");
+        let portable = super::user_dir(exe).join("nand");
         copy_tree(
             &portable.join(ACCOUNT),
             &dir.join(NAND).join(ACCOUNT),
@@ -171,10 +168,7 @@ pub fn capture_after_play(exe: &Path, dir: &Path) -> io::Result<()> {
 /// Only saves and profiles travel to RomM, never firmware, keys or other games' NAND.
 pub fn prepare(exe: &Path, dir: &Path) -> io::Result<()> {
     std::fs::create_dir_all(dir)?;
-    let portable = exe
-        .parent()
-        .ok_or_else(|| invalid("Missing Eden directory"))?
-        .join("user");
+    let portable = super::user_dir(exe);
     let nand = dir.join(NAND);
     let archive = dir.join(FILE);
     if archive.exists() {
@@ -329,7 +323,7 @@ mod tests {
     fn round_trip_is_per_game_and_excludes_firmware_and_keys() {
         let temp = tempfile::tempdir().unwrap();
         let exe = temp.path().join("installed/eden");
-        let portable = exe.parent().unwrap().join("user");
+        let portable = super::super::user_dir(&exe);
         write(&portable.join("keys/prod.keys"), b"secret");
         write(
             &portable.join("nand/system/Contents/registered/fw.nca"),
@@ -408,13 +402,11 @@ mod tests {
     #[test]
     fn user_ids_travel_with_saves_and_seed_edens_early_account_manager() {
         let temp = tempfile::tempdir().unwrap();
-        let first = temp.path().join("device1/eden");
+        let first = temp.path().join("device1/v1/eden");
         let game = temp.path().join("game");
         prepare(&first, &game).unwrap();
-        let early = first
-            .parent()
-            .unwrap()
-            .join("user/nand")
+        let early = super::super::user_dir(&first)
+            .join("nand")
             .join(ACCOUNT)
             .join("su/avators/profiles.dat");
         // Simulate Eden generating the first profile before it reads qt-config.ini.
@@ -424,8 +416,8 @@ mod tests {
             b"saved",
         );
         capture_after_play(&first, &game).unwrap();
-        let second = temp.path().join("device2/eden");
-        let second_early = second.parent().unwrap().join("user/nand").join(ACCOUNT);
+        let second = temp.path().join("device2/v1/eden");
+        let second_early = super::super::user_dir(&second).join("nand").join(ACCOUNT);
         write(
             &second_early.join("su/avators/profiles.dat"),
             b"device2 UUID",

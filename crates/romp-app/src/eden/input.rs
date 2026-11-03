@@ -6,46 +6,174 @@ use std::path::Path;
 type Settings = BTreeMap<String, String>;
 const MAX_PLAYERS: usize = 8;
 
-/// Refresh Romlin's controller setup, preserving players customized in Eden.
-pub fn prepare(exe: &Path, controllers: &[SdlController]) -> io::Result<()> {
-    let dir = exe
-        .parent()
-        .ok_or_else(|| io::Error::other("Missing Eden directory"))?
-        .join("user/config");
-    let config = dir.join("qt-config.ini");
-    // Keep the ownership snapshot name so existing custom controller settings stay protected.
-    let state = dir.join("romp-input.json");
+pub struct Prepared {
+    pub missing: bool,
+    pub steam_virtual: bool,
+}
+
+/// Reapply before every SDL initialization; SDL_Quit clears the hints.
+pub fn configure_sdl() {
+    for (hint, value) in [
+        ("SDL_JOYSTICK_HIDAPI_XBOX", "0"),
+        ("SDL_JOYSTICK_HIDAPI_COMBINE_JOY_CONS", "0"),
+        ("SDL_JOYSTICK_HIDAPI_VERTICAL_JOY_CONS", "1"),
+        ("SDL_GAMECONTROLLER_USE_BUTTON_LABELS", "0"),
+    ] {
+        sdl3::hint::set(hint, value);
+    }
+}
+
+/// Refresh all controller slots on every launch.
+pub fn prepare(exe: &Path, controllers: &[SdlController]) -> io::Result<Prepared> {
+    let config = super::user_dir(exe).join("config/qt-config.ini");
     let existing = match std::fs::read_to_string(&config) {
         Ok(text) => text,
         Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e),
     };
-    let previous = match std::fs::read(&state) {
-        Ok(bytes) => serde_json::from_slice(&bytes).map_err(io::Error::other)?,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => Settings::new(),
-        Err(e) => return Err(e),
-    };
-    let Some((text, managed)) = config_text(&existing, controllers, &previous) else {
-        let guids: Vec<String> = controllers.iter().map(|c| guid_hex(c.guid)).collect();
-        tracing::info!(?guids, "Eden controls left unchanged");
-        return Ok(());
-    };
-    let players: Vec<String> = managed
+    let (text, prepared) = config_text(&existing, controllers);
+    crate::saves::replace_file(&config, text.as_bytes())?;
+    Ok(prepared)
+}
+
+// SDL2 HIDAPI uses standardized raw button indices; SDL3 moved the D-pad to a hat.
+// Verified against SDL2's HIDAPI drivers, not SDL3's generated mapping strings.
+const SDL2_STANDARD_HIDAPI: &str = "guid,SDL2 HIDAPI,\
+    a:b0,b:b1,x:b2,y:b3,back:b4,guide:b5,start:b6,\
+    leftstick:b7,rightstick:b8,leftshoulder:b9,rightshoulder:b10,\
+    dpup:b11,dpdown:b12,dpleft:b13,dpright:b14,misc1:b15,\
+    leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:a4,righttrigger:a5,";
+const SDL2_JOYCON_LEFT: &str = "guid,SDL2 Joy-Con Left,\
+    back:b4,leftshoulder:b9,leftstick:b7,lefttrigger:a4,\
+    dpup:b11,dpdown:b12,dpleft:b13,dpright:b14,misc1:b15,leftx:a0,lefty:a1,";
+const SDL2_JOYCON_RIGHT: &str = "guid,SDL2 Joy-Con Right,\
+    a:b0,b:b1,x:b2,y:b3,guide:b5,start:b6,\
+    rightshoulder:b10,rightstick:b8,righttrigger:a5,rightx:a2,righty:a3,";
+
+// Only original devices with verified SDL2 drivers; unknown HIDAPI layouts are unusable.
+const HIDAPI_LAYOUTS: &[(u16, u16, &str)] = &[
+    (0x28de, 0x1205, SDL2_STANDARD_HIDAPI), // Steam Deck
+    (0x054c, 0x05c4, SDL2_STANDARD_HIDAPI), // DualShock 4
+    (0x054c, 0x09cc, SDL2_STANDARD_HIDAPI),
+    (0x054c, 0x0ba0, SDL2_STANDARD_HIDAPI), // Sony wireless adapter
+    (0x054c, 0x0ce6, SDL2_STANDARD_HIDAPI), // DualSense
+    (0x054c, 0x0df2, SDL2_STANDARD_HIDAPI), // DualSense Edge
+    (0x057e, 0x2009, SDL2_STANDARD_HIDAPI), // Switch Pro
+    (0x057e, 0x2006, SDL2_JOYCON_LEFT),
+    (0x057e, 0x2007, SDL2_JOYCON_RIGHT),
+    (0x1949, 0x0419, SDL2_STANDARD_HIDAPI), // Amazon Luna
+    (0x18d1, 0x9400, SDL2_STANDARD_HIDAPI), // Stadia
+    (0x0955, 0x7210, SDL2_STANDARD_HIDAPI), // Shield
+    (0x0955, 0x7214, SDL2_STANDARD_HIDAPI),
+];
+
+fn ids(guid: [u8; 16]) -> (u16, u16) {
+    (
+        u16::from_le_bytes([guid[4], guid[5]]),
+        u16::from_le_bytes([guid[8], guid[9]]),
+    )
+}
+
+fn sdl2_mapping(controller: &SdlController) -> Option<&str> {
+    let mapping = controller.mapping.as_deref()?;
+    let guid = controller.identity.guid;
+    if guid[14] == b'h' {
+        let (vendor, product) = ids(guid);
+        return HIDAPI_LAYOUTS
+            .iter()
+            .find(|(v, p, _)| (*v, *p) == (vendor, product))
+            .map(|(_, _, mapping)| *mapping);
+    }
+    (mapping.contains("a:") && mapping.contains("leftx:")).then_some(mapping)
+}
+
+struct Controller<'a> {
+    observed: &'a SdlController,
+    guid: [u8; 16],
+    port: usize,
+    mapping: Option<&'a str>,
+}
+
+fn controllers(observed: &[SdlController]) -> (Vec<Controller<'_>>, bool) {
+    let mut controllers: Vec<_> = observed
         .iter()
-        .filter(|(key, value)| key.ends_with("_connected") && *value == "true")
-        .map(|(key, _)| {
-            let player = key.trim_end_matches("_connected");
-            let a = managed.get(&format!("{player}_button_a"));
-            format!("{player}: {}", a.map_or("", String::as_str))
+        .map(|pad| {
+            let mut guid = pad.identity.guid;
+            guid[2..4].fill(0);
+            // SDL2 tags every HIDAPI device as USB, including Bluetooth devices.
+            if guid[14] == b'h' {
+                guid[0..2].copy_from_slice(&3u16.to_le_bytes());
+            }
+            Controller {
+                observed: pad,
+                guid,
+                port: 0,
+                mapping: sdl2_mapping(pad),
+            }
         })
         .collect();
-    tracing::info!(?players, "Eden controls configured");
-    crate::saves::replace_file(&config, text.as_bytes())?;
-    crate::saves::replace_file(
-        &state,
-        &serde_json::to_vec(&managed).map_err(io::Error::other)?,
-    )?;
-    Ok(())
+    let mut groups = BTreeMap::<_, Vec<usize>>::new();
+    for (index, controller) in controllers.iter().enumerate() {
+        groups.entry(controller.guid).or_default().push(index);
+    }
+    for indices in groups.values_mut() {
+        // Assign Eden's device ports before choosing Player 1.
+        let order: Option<Vec<_>> = indices
+            .iter()
+            .map(|i| linux_order(controllers[*i].observed))
+            .collect();
+        if let Some(order) = order {
+            let mut sorted: Vec<_> = indices.iter().copied().zip(order).collect();
+            sorted.sort_by_key(|(_, key)| *key);
+            *indices = sorted.into_iter().map(|(i, _)| i).collect();
+        }
+        for (port, index) in indices.iter().enumerate() {
+            controllers[*index].port = port;
+        }
+    }
+    let steam_virtual = controllers.iter().any(|c| ids(c.guid) == (0x28de, 0x11ff));
+    controllers.retain(|c| !steam_virtual || ids(c.guid) != (0x28de, 0x1205));
+    if let Some((index, _)) = controllers
+        .iter()
+        .enumerate()
+        .filter(|(_, c)| c.observed.last_active.is_some())
+        .max_by_key(|(_, c)| c.observed.last_active)
+    {
+        let active = controllers.remove(index);
+        controllers.insert(0, active);
+    }
+    (controllers, steam_virtual)
+}
+
+fn linux_order(controller: &SdlController) -> Option<(u8, u32)> {
+    if !cfg!(target_os = "linux") {
+        return None;
+    }
+    if ids(controller.identity.guid) == (0x28de, 0x11ff) {
+        return controller.player_index.map(|slot| (0, u32::from(slot)));
+    }
+    let event = controller
+        .identity
+        .path
+        .as_deref()?
+        .strip_prefix("/dev/input/event")?;
+    let number: u32 = event.parse().ok()?;
+    // SDL2 sorts evdev devices by their js index, falling back to event number.
+    let js = std::fs::read_dir(format!("/sys/class/input/event{number}/device"))
+        .ok()
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            entry
+                .file_name()
+                .to_str()?
+                .strip_prefix("js")?
+                .parse::<u32>()
+                .ok()
+        })
+        .min();
+    Some(js.map_or((2, number), |number| (1, number)))
 }
 
 // SDL uses raw joystick indices here, not standardized Gamepad button/axis numbers.
@@ -108,86 +236,11 @@ fn axis(binding: &str) -> Option<(u32, bool)> {
     Some((index.trim_end_matches('~').parse().ok()?, inverted))
 }
 
-fn read_controls(existing: &str) -> BTreeMap<&str, &str> {
-    let mut in_controls = false;
-    existing
-        .lines()
-        .filter(|line| {
-            if line.trim_start().starts_with('[') {
-                in_controls = line.trim() == "[Controls]";
-                return false;
-            }
-            in_controls
-        })
-        .filter_map(|line| line.split_once('='))
-        .map(|(key, value)| (key.trim(), value.trim().trim_matches('"')))
-        .collect()
-}
-
-// Eden serializes ParamPackage fields in its own order.
-fn same_value(a: &str, b: &str) -> bool {
-    if a.contains("engine:") && b.contains("engine:") {
-        let params = |text: &str| -> BTreeMap<String, String> {
-            text.split(',')
-                .filter_map(|field| field.split_once(':'))
-                .map(|(key, value)| (key.into(), value.into()))
-                .collect()
-        };
-        params(a) == params(b)
-    } else {
-        a == b
-    }
-}
-
-fn can_configure(controls: &BTreeMap<&str, &str>, previous: &Settings, player: usize) -> bool {
-    let prefix = format!("player_{player}_");
-    let mut has_nondefault_input = false;
-    // A non-default input without a matching Romlin snapshot belongs to the user.
-    let customized = controls.iter().any(|(key, value)| {
-        let Some(field) = key.strip_prefix(&prefix) else {
-            return false;
-        };
-        if field == "profile_name" {
-            return !value.is_empty();
-        }
-        let Some(setting) = key.strip_suffix("\\default") else {
-            return false;
-        };
-        let nondefault = (field.starts_with("button_")
-            || field.starts_with("lstick")
-            || field.starts_with("rstick")
-            || field.starts_with("motion")
-            || field == "type\\default")
-            && *value == "false";
-        has_nondefault_input |= nondefault;
-        nondefault
-            && !previous.get(setting).is_some_and(|old| {
-                controls
-                    .get(setting)
-                    .is_some_and(|now| same_value(now, old))
-            })
-    });
-    !customized
-        && (!has_nondefault_input
-            || previous
-                .iter()
-                .filter(|(key, _)| key.starts_with(&prefix))
-                .all(|(key, old)| {
-                    let binding = key.contains("_button_")
-                        || key.ends_with("_lstick")
-                        || key.ends_with("_rstick");
-                    (!binding || controls.get(format!("{key}\\default").as_str()) == Some(&"false"))
-                        && controls
-                            .get(key.as_str())
-                            .is_some_and(|now| same_value(now, old))
-                }))
-}
-
 fn guid_hex(guid: [u8; 16]) -> String {
     guid.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn player_settings(mapping: &str, device: &str, controller_type: &str) -> Settings {
+fn player_settings(mapping: &str, device: &str) -> Settings {
     let bindings: BTreeMap<_, _> = mapping
         .split(',')
         .skip(2)
@@ -195,7 +248,7 @@ fn player_settings(mapping: &str, device: &str, controller_type: &str) -> Settin
         .collect();
     let mut settings = Settings::from([
         ("connected".into(), "true".into()),
-        ("type".into(), controller_type.into()),
+        ("type".into(), "0".into()),
     ]);
     for (name, sdl) in BUTTONS {
         let value = bindings.get(sdl).and_then(|binding| button(binding));
@@ -222,98 +275,55 @@ fn player_settings(mapping: &str, device: &str, controller_type: &str) -> Settin
     settings
 }
 
-fn config_text(
-    existing: &str,
-    controllers: &[SdlController],
-    previous: &Settings,
-) -> Option<(String, Settings)> {
-    let controls = read_controls(existing);
-    let first_owned =
-        can_configure(&controls, previous, 0) && can_configure(&controls, previous, 8);
-    let handheld = controllers.len() == 1;
-    let mut managed = Settings::new();
-    let mut ports = BTreeMap::<[u8; 16], usize>::new();
-    for (player, controller) in controllers.iter().take(MAX_PLAYERS).enumerate() {
-        // Eden strips the name CRC and numbers identical GUIDs from zero independently.
-        let mut guid = controller.guid;
-        guid[2..4].fill(0);
-        let port = ports.entry(guid).or_default();
-        let device = format!("engine:sdl,guid:{},port:{port}", guid_hex(guid));
-        *port += 1;
-        let owned = if player == 0 {
-            first_owned
-        } else {
-            can_configure(&controls, previous, player)
-        };
-        let Some(mapping) = controller.mapping.as_deref().filter(|_| owned) else {
-            continue;
-        };
-        let controller_type = if player == 0 && handheld { "4" } else { "0" };
-        let mut settings = player_settings(mapping, &device, controller_type);
-        if player == 0 {
-            // Handheld has a separate input slot; never leave it connected alongside Player 1.
-            let mut handheld_settings = settings.clone();
-            handheld_settings.insert("type".into(), "4".into());
-            handheld_settings.insert("connected".into(), handheld.to_string());
-            managed.extend(
-                handheld_settings
-                    .into_iter()
-                    .map(|(key, value)| (format!("player_8_{key}"), value)),
-            );
-            settings.insert("connected".into(), (!handheld).to_string());
-        }
-        managed.extend(
-            settings
-                .into_iter()
-                .map(|(key, value)| (format!("player_{player}_{key}"), value)),
-        );
-    }
-
-    // Disconnect absent devices only in slots Romlin still owns, keeping their bindings for reconnect.
+fn config_text(existing: &str, observed: &[SdlController]) -> (String, Prepared) {
+    let (controllers, steam_virtual) = controllers(observed);
+    let missing = controllers.is_empty() || controllers.iter().any(|c| c.mapping.is_none());
+    let mut usable = controllers.iter().filter_map(|c| Some((c, c.mapping?)));
+    let mut settings = Settings::new();
     for player in 0..=MAX_PLAYERS {
         let prefix = format!("player_{player}_");
-        if (matches!(player, 0 | 8) && !first_owned)
-            || managed.contains_key(&format!("{prefix}connected"))
-            || !can_configure(&controls, previous, player)
-        {
-            continue;
-        }
-        let old: Settings = previous
-            .iter()
-            .filter(|(key, _)| key.starts_with(&prefix))
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect();
-        if !old.is_empty() {
-            managed.extend(old);
-            managed.insert(format!("{prefix}connected"), "false".into());
+        let controller = if player < MAX_PLAYERS {
+            usable.next()
+        } else {
+            None
+        };
+        let values = controller
+            .map(|(controller, mapping)| {
+                let device = format!(
+                    "engine:sdl,guid:{},port:{}",
+                    guid_hex(controller.guid),
+                    controller.port
+                );
+                player_settings(mapping, &device)
+            })
+            .unwrap_or_else(|| Settings::from([("connected".into(), "false".into())]));
+        settings.insert(format!("{prefix}profile_name"), String::new());
+        for (key, value) in values {
+            let key = format!("{prefix}{key}");
+            settings.insert(format!("{key}\\default"), "false".into());
+            settings.insert(key, value);
         }
     }
-    if managed.is_empty() {
-        return None;
+    for driver in ["enable_joycon_driver", "enable_procon_driver"] {
+        settings.insert(driver.into(), "false".into());
+        settings.insert(format!("{driver}\\default"), "false".into());
     }
-
-    let mut settings = managed.clone();
-    // Eden ignores input values unless their default flags are explicitly disabled.
-    settings.extend(
-        managed
-            .keys()
-            .map(|key| (format!("{key}\\default"), "false".into())),
-    );
     let text = replace_settings(existing, "Controls", &settings);
-    // System settings are loaded after Controls and would otherwise restore docked mode.
-    let text = if handheld && managed.contains_key("player_0_type") && first_owned {
-        replace_settings(
-            &text,
-            "System",
-            &BTreeMap::from([
-                ("use_docked_mode".into(), "0".into()),
-                ("use_docked_mode\\default".into(), "false".into()),
-            ]),
-        )
-    } else {
-        text
-    };
-    Some((text, managed))
+    let text = replace_settings(
+        &text,
+        "System",
+        &Settings::from([
+            ("use_docked_mode".into(), "1".into()),
+            ("use_docked_mode\\default".into(), "false".into()),
+        ]),
+    );
+    (
+        text,
+        Prepared {
+            missing,
+            steam_virtual,
+        },
+    )
 }
 
 fn replace_settings(existing: &str, section: &str, settings: &BTreeMap<String, String>) -> String {
@@ -353,323 +363,271 @@ fn replace_settings(existing: &str, section: &str, settings: &BTreeMap<String, S
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gamepads::SdlIdentity;
+    use std::time::Instant;
 
-    // Xbox-compatible evdev layout: triggers interrupt the stick axis numbering.
-    const MAPPING: &str = "030000005e0400008e02000014010000,Xbox 360 Controller,\
+    const STEAM: &str = "03000000de280000ff11000001000000,Steam Virtual Gamepad,\
         a:b0,b:b1,x:b2,y:b3,back:b6,start:b7,guide:b8,leftstick:b9,rightstick:b10,\
         leftshoulder:b4,rightshoulder:b5,dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,\
-        leftx:a0,lefty:a1,rightx:a3,righty:a4,lefttrigger:a2,righttrigger:a5,platform:Linux,";
-    const GUID: [u8; 16] = [
-        3, 0, 0xab, 0xcd, 0x5e, 4, 0, 0, 0x8e, 2, 0, 0, 0x14, 1, 0, 0,
-    ];
+        leftx:a0,lefty:a1,rightx:a3,righty:a4,lefttrigger:a2,righttrigger:a5,";
+    const DUALSENSE_SDL3: &str =
+        "030000004c050000e60c000000016800,DualSense Wireless Controller,a:b0,b:b1,x:b2,y:b3,\
+        back:b4,guide:b5,start:b6,leftstick:b7,rightstick:b8,leftshoulder:b9,rightshoulder:b10,\
+        dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,touchpad:b11,misc1:b12,\
+        leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:a4,righttrigger:a5,";
 
-    fn pad(guid: [u8; 16]) -> SdlController {
+    const DUALSHOCK4_SDL3: &str =
+        "030000004c050000c405000000016800,PS4 Controller,a:b0,b:b1,x:b2,y:b3,\
+        back:b4,guide:b5,start:b6,leftstick:b7,rightstick:b8,leftshoulder:b9,rightshoulder:b10,\
+        dpup:h0.1,dpdown:h0.4,dpleft:h0.8,dpright:h0.2,touchpad:b11,\
+        leftx:a0,lefty:a1,rightx:a2,righty:a3,lefttrigger:a4,righttrigger:a5,";
+
+    fn pad(hex: &str, mapping: &str) -> SdlController {
+        let guid = std::array::from_fn(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap());
         SdlController {
-            guid,
-            mapping: Some(MAPPING.into()),
+            identity: SdlIdentity { guid, path: None },
+            mapping: Some(mapping.into()),
+            last_active: None,
+            player_index: None,
         }
     }
 
-    fn setting<'a>(text: &'a str, key: &str) -> &'a str {
-        let mut controls = false;
+    fn setting<'a>(text: &'a str, section: &str, key: &str) -> &'a str {
+        let mut current = "";
         text.lines()
             .find_map(|line| {
-                if line.starts_with('[') {
-                    controls = line == "[Controls]";
+                if let Some(header) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+                    current = header;
                 }
                 let (k, value) = line.split_once('=')?;
-                (controls && k == key).then_some(value)
+                (current == section && k == key).then_some(value)
             })
-            .unwrap()
+            .unwrap_or_else(|| panic!("Missing [{section}] {key}"))
     }
 
-    fn input<'a>(text: &'a str, key: &str) -> BTreeMap<&'a str, &'a str> {
-        // Eden ignores an input value without this flag, even if the binding is correct.
-        assert_eq!(setting(text, &format!("{key}\\default")), "false");
-        setting(text, key)
-            .split(',')
-            .map(|field| field.split_once(':').unwrap())
-            .collect()
+    fn control<'a>(text: &'a str, key: &str) -> &'a str {
+        assert_eq!(
+            setting(text, "Controls", &format!("{key}\\default")),
+            "false"
+        );
+        setting(text, "Controls", key)
     }
 
     #[test]
-    fn fresh_install_connects_a_handheld_with_actual_sdl_bindings() {
-        let dir = tempfile::tempdir().unwrap();
-        let exe = dir.path().join("eden");
-        prepare(&exe, &[pad(GUID)]).unwrap();
-        let config = dir.path().join("user/config/qt-config.ini");
-        let text = std::fs::read_to_string(&config).unwrap();
-        assert!(text.contains("[System]\nuse_docked_mode=0\nuse_docked_mode\\default=false\n"));
-        assert_eq!(setting(&text, "player_0_connected"), "false");
-        assert_eq!(setting(&text, "player_0_connected\\default"), "false");
-        assert_eq!(setting(&text, "player_8_connected"), "true");
-        assert_eq!(setting(&text, "player_8_connected\\default"), "false");
-        assert_eq!(setting(&text, "player_0_type"), "4");
-        assert_eq!(setting(&text, "player_0_type\\default"), "false");
-        assert_eq!(setting(&text, "player_8_type"), "4");
-        assert_eq!(setting(&text, "player_8_type\\default"), "false");
-        let a = input(&text, "player_8_button_a");
-        assert_eq!(a["engine"], "sdl");
-        assert_eq!(a["guid"], "030000005e0400008e02000014010000");
-        assert_eq!(a["port"], "0");
-        assert_eq!(a["button"], "1");
-        assert_eq!(input(&text, "player_0_button_a"), a);
-        assert_eq!(
-            input(&text, "player_8_lstick"),
-            input(&text, "player_0_lstick")
-        );
-        assert_eq!(
-            input(&text, "player_8_rstick"),
-            input(&text, "player_0_rstick")
-        );
-        assert_eq!(input(&text, "player_0_button_b")["button"], "0");
-        let up = input(&text, "player_0_button_dup");
-        assert_eq!(up["hat"], "0");
-        assert_eq!(up["direction"], "up");
-        assert_eq!(input(&text, "player_0_button_zl")["axis"], "2");
-        assert_eq!(input(&text, "player_0_button_zr")["axis"], "5");
-        let right = input(&text, "player_0_rstick");
-        assert_eq!(right["axis_x"], "3");
-        assert_eq!(right["axis_y"], "4");
-        assert_eq!(input(&text, "player_0_button_screenshot")["engine"], "null");
-        // Repeated launches must not accumulate duplicate sections or whitespace.
-        prepare(&exe, &[pad(GUID)]).unwrap();
-        assert_eq!(std::fs::read_to_string(config).unwrap(), text);
-    }
-
-    #[test]
-    fn repairs_edens_keyboard_defaults_without_changing_other_settings() {
-        let existing = "[Renderer]\nbackend=1\n[Controls]\n\
-            player_0_type=0\nplayer_0_type\\default=true\n\
-            player_0_button_a=engine:keyboard,code:67\nplayer_0_button_a\\default=true\n\
-            player_1_connected=true\nplayer_1_button_a=engine:sdl,button:8\n\
-            touchscreen_enabled=true\n[Data%20Storage]\nnand_directory=/saves/game\n\
-            [System]\nuse_docked_mode=1\nuse_docked_mode\\default=true\nlanguage_index=1\n";
-        let (text, _) = config_text(existing, &[pad(GUID)], &Settings::new()).unwrap();
-        assert_eq!(text.matches("[Controls]").count(), 1);
-        assert_eq!(text.matches("[System]").count(), 1);
-        assert!(text.contains("use_docked_mode=0\nuse_docked_mode\\default=false\n"));
-        assert!(!text.contains("engine:keyboard"));
-        assert_eq!(input(&text, "player_0_button_a")["button"], "1");
-        for preserved in [
-            "backend=1",
-            "player_1_connected=true",
-            "player_1_button_a=engine:sdl,button:8",
-            "touchscreen_enabled=true",
-            "nand_directory=/saves/game",
-            "language_index=1",
+    fn steam_bindings_are_exact_and_repeated_writes_preserve_other_settings() {
+        let pads = [pad("0300abcdde280000ff11000001000000", STEAM)];
+        let original = "[Renderer]\nbackend=1\n[Controls]\nplayer_0_profile_name=custom\nenable_procon_driver=true\nenable_procon_driver\\default=true\nenable_joycon_driver=true\n";
+        let (text, result) = config_text(original, &pads);
+        assert!(!result.missing);
+        assert!(result.steam_virtual);
+        assert_eq!(setting(&text, "Renderer", "backend"), "1");
+        assert_eq!(setting(&text, "Controls", "player_0_profile_name"), "");
+        assert_eq!(control(&text, "player_0_connected"), "true");
+        assert_eq!(control(&text, "player_0_type"), "0");
+        let device = "engine:sdl,guid:03000000de280000ff11000001000000,port:0";
+        for (key, binding) in [
+            ("button_a", "button:1"),
+            ("button_b", "button:0"),
+            ("button_zl", "axis:2,threshold:0.5,invert:+"),
+            ("button_zr", "axis:5,threshold:0.5,invert:+"),
+            ("button_dup", "hat:0,direction:up"),
+            (
+                "lstick",
+                "axis_x:0,axis_y:1,invert_x:+,invert_y:+,deadzone:0.15,range:1.0",
+            ),
+            (
+                "rstick",
+                "axis_x:3,axis_y:4,invert_x:+,invert_y:+,deadzone:0.15,range:1.0",
+            ),
         ] {
-            assert!(text.contains(preserved), "{preserved}");
+            assert_eq!(
+                control(&text, &format!("player_0_{key}")),
+                format!("{device},{binding}")
+            );
+        }
+        for driver in ["enable_joycon_driver", "enable_procon_driver"] {
+            assert_eq!(control(&text, driver), "false");
+        }
+        assert_eq!(setting(&text, "System", "use_docked_mode"), "1");
+        assert_eq!(
+            setting(&text, "System", "use_docked_mode\\default"),
+            "false"
+        );
+        assert_eq!(config_text(&text, &pads).0, text);
+        for section in ["Controls", "System", "Renderer"] {
+            assert_eq!(text.matches(&format!("[{section}]")).count(), 1);
         }
     }
 
     #[test]
-    fn keeps_manual_bindings_and_input_profiles() {
-        for custom in [
-            "player_0_button_a=engine:sdl,button:2\nplayer_0_button_a\\default=false",
-            "player_0_button_a=engine:keyboard,code:65\nplayer_0_button_a\\default=false",
-            "player_0_lstick\\default=false",
-            "player_0_motionleft\\default=false",
-            "player_8_button_a=engine:sdl,button:2\nplayer_8_button_a\\default=false",
-            "player_0_profile_name=My controller",
-            "player_8_profile_name=Handheld controller",
+    fn sony_and_deck_hidapi_use_sdl2_buttons_instead_of_sdl3_hats() {
+        // Real Sony HIDAPI GUIDs: DS4, DS4 v2, DualSense and DualSense Edge.
+        for hex in [
+            "030000004c050000c405000000016800",
+            "030000004c050000cc09000000016800",
+            "030000004c050000e60c000000016800",
+            "030000004c050000f20d000000016800",
+            "03000000de2800000512000011016800",
         ] {
-            assert!(config_text(
-                &format!("[Controls]\n{custom}\n"),
-                &[pad(GUID)],
-                &Settings::new()
-            )
-            .is_none());
+            let mapping = if hex[16..20] == *"c405" || hex[16..20] == *"cc09" {
+                DUALSHOCK4_SDL3
+            } else {
+                DUALSENSE_SDL3
+            };
+            let pads = [pad(hex, mapping)];
+            let (text, result) = config_text("", &pads);
+            assert!(!result.missing, "{hex}");
+            let device = format!("engine:sdl,guid:{hex},port:0");
+            for (key, button) in [
+                ("a", 1),
+                ("b", 0),
+                ("dup", 11),
+                ("ddown", 12),
+                ("dleft", 13),
+                ("dright", 14),
+                ("screenshot", 15),
+            ] {
+                assert_eq!(
+                    control(&text, &format!("player_0_button_{key}")),
+                    format!("{device},button:{button}")
+                );
+            }
+            assert_eq!(
+                control(&text, "player_0_rstick"),
+                format!("{device},axis_x:2,axis_y:3,invert_x:+,invert_y:+,deadzone:0.15,range:1.0")
+            );
+            assert_eq!(
+                control(&text, "player_0_button_zl"),
+                format!("{device},axis:4,threshold:0.5,invert:+")
+            );
+            assert_eq!(
+                control(&text, "player_0_button_zr"),
+                format!("{device},axis:5,threshold:0.5,invert:+")
+            );
         }
     }
 
     #[test]
-    fn assigns_distinct_ports_to_identical_controllers_up_to_eight_players() {
-        let mut same_model = GUID;
-        same_model[2..4].fill(0); // Name CRCs must not split Eden's port counter.
-        let mut pads = vec![pad(GUID), pad([7; 16]), pad(same_model)];
-        pads.extend((0..6).map(|_| pad(GUID)));
-        let (text, _) = config_text("", &pads, &Settings::new()).unwrap();
+    fn bluetooth_hidapi_guids_use_sdl2s_usb_bus() {
+        let pads = [pad("050000004c050000e60c000000016800", DUALSENSE_SDL3)];
+        let (text, result) = config_text("", &pads);
+        assert!(!result.missing);
+        assert_eq!(
+            control(&text, "player_0_button_a"),
+            "engine:sdl,guid:030000004c050000e60c000000016800,port:0,button:1"
+        );
+    }
+
+    #[test]
+    fn nintendo_uses_sdl_with_vertical_uncombined_joycons() {
+        for (hex, key, binding) in [
+            (
+                "030000007e0500000920000000006803",
+                "button_dup",
+                "button:11",
+            ),
+            (
+                "030000007e0500000620000000006801",
+                "button_dup",
+                "button:11",
+            ),
+            ("030000007e0500000720000000006802", "button_a", "button:1"),
+        ] {
+            let (text, result) = config_text(
+                "[Controls]\nenable_procon_driver=true\n",
+                &[pad(hex, DUALSENSE_SDL3)],
+            );
+            assert!(!result.missing);
+            assert_eq!(control(&text, "enable_procon_driver"), "false");
+            assert_eq!(control(&text, "enable_joycon_driver"), "false");
+            assert_eq!(
+                control(&text, &format!("player_0_{key}")),
+                format!("engine:sdl,guid:{hex},port:0,{binding}")
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_hidapi_and_missing_mappings_are_unusable() {
+        let mut pads = [pad("03000000341200007856000000016800", DUALSENSE_SDL3)];
+        let (text, result) = config_text("", &pads);
+        assert!(result.missing);
+        assert_eq!(control(&text, "player_0_connected"), "false");
+        pads[0].mapping = None;
+        assert!(config_text("", &pads).1.missing);
+        assert!(config_text("", &[]).1.missing);
+    }
+
+    #[test]
+    fn unusable_first_pad_does_not_consume_player_one_or_renumber_device_ports() {
+        let supported = pad("030000004c050000c405000000016800", DUALSHOCK4_SDL3);
+        let unsupported = pad("03000000341200007856000000016800", DUALSHOCK4_SDL3);
+        let mut unmapped = supported.clone();
+        unmapped.mapping = None;
+        for (first, port) in [(unsupported, 0), (unmapped, 1)] {
+            let (text, result) = config_text("", &[first, supported.clone()]);
+            assert!(result.missing);
+            assert_eq!(control(&text, "player_0_connected"), "true");
+            assert_eq!(
+                control(&text, "player_0_button_a"),
+                format!("engine:sdl,guid:030000004c050000c405000000016800,port:{port},button:1")
+            );
+            assert_eq!(control(&text, "player_1_connected"), "false");
+            assert_eq!(control(&text, "player_8_connected"), "false");
+        }
+    }
+
+    #[test]
+    fn ports_are_assigned_before_active_player_and_deck_deduplication() {
+        let mut pads = vec![
+            pad("03000000de280000ff11000001000000", STEAM),
+            pad("03000000de2800000512000011016800", DUALSENSE_SDL3),
+            pad("0300abcdde280000ff11000001000000", STEAM),
+        ];
+        pads[0].player_index = Some(0);
+        pads[2].player_index = Some(1);
+        pads[2].last_active = Some(Instant::now());
+        let (text, result) = config_text("", &pads);
+        assert!(!result.missing); // The shadowed Deck isn't an unusable extra player.
+        assert!(result.steam_virtual);
+        assert_eq!(
+            control(&text, "player_0_button_a"),
+            "engine:sdl,guid:03000000de280000ff11000001000000,port:1,button:1"
+        );
+        assert_eq!(
+            control(&text, "player_1_button_a"),
+            "engine:sdl,guid:03000000de280000ff11000001000000,port:0,button:1"
+        );
+        assert_eq!(control(&text, "player_2_connected"), "false");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn evdev_ports_follow_numeric_device_paths_after_hotplug() {
+        let mut pads = vec![pad("030000005e0400008e02000014010000", STEAM); 2];
+        pads[0].identity.path = Some("/dev/input/event9001".into());
+        pads[1].identity.path = Some("/dev/input/event9000".into());
+        let (controllers, _) = controllers(&pads);
+        assert_eq!(controllers[0].port, 1);
+        assert_eq!(controllers[1].port, 0);
+    }
+
+    #[test]
+    fn eight_players_connect_and_handheld_stays_disconnected() {
+        let pads = vec![pad("03000000de280000ff11000001000000", STEAM); 9];
+        let (text, result) = config_text("", &pads);
+        assert!(!result.missing);
         for player in 0..8 {
             assert_eq!(
-                setting(&text, &format!("player_{player}_connected")),
+                control(&text, &format!("player_{player}_connected")),
                 "true"
             );
-            assert_eq!(setting(&text, &format!("player_{player}_type")), "0");
-        }
-        assert_eq!(input(&text, "player_0_button_a")["port"], "0");
-        assert_eq!(input(&text, "player_1_button_a")["port"], "0");
-        assert_eq!(input(&text, "player_2_button_a")["port"], "1");
-        assert_eq!(input(&text, "player_7_button_a")["port"], "6");
-        assert_eq!(setting(&text, "player_8_connected"), "false");
-        assert!(!text.contains("player_9_"));
-    }
-
-    #[test]
-    fn switches_between_solo_and_multiplayer_across_launches() {
-        let dir = tempfile::tempdir().unwrap();
-        let exe = dir.path().join("eden");
-        let config = dir.path().join("user/config/qt-config.ini");
-        prepare(&exe, &[pad(GUID)]).unwrap();
-        prepare(&exe, &[pad(GUID), pad(GUID)]).unwrap();
-        let text = std::fs::read_to_string(&config).unwrap();
-        assert_eq!(setting(&text, "player_0_connected"), "true");
-        assert_eq!(setting(&text, "player_1_connected"), "true");
-        assert_eq!(setting(&text, "player_8_connected"), "false");
-        assert_eq!(input(&text, "player_1_button_a")["port"], "1");
-
-        // The surviving physical pad becomes the first controller in the next Eden process.
-        prepare(&exe, &[pad(GUID)]).unwrap();
-        let text = std::fs::read_to_string(&config).unwrap();
-        assert_eq!(setting(&text, "player_0_connected"), "false");
-        assert_eq!(setting(&text, "player_1_connected"), "false");
-        assert_eq!(setting(&text, "player_8_connected"), "true");
-        assert_eq!(input(&text, "player_8_button_a")["port"], "0");
-
-        prepare(&exe, &[]).unwrap();
-        let text = std::fs::read_to_string(config).unwrap();
-        for player in [0, 1, 8] {
+            assert_eq!(control(&text, &format!("player_{player}_type")), "0");
             assert_eq!(
-                setting(&text, &format!("player_{player}_connected")),
-                "false"
+                control(&text, &format!("player_{player}_button_a")),
+                format!("engine:sdl,guid:03000000de280000ff11000001000000,port:{player},button:1")
             );
         }
-    }
-
-    #[test]
-    fn refreshes_automatic_bindings_after_eden_reorders_parameters() {
-        let (text, previous) = config_text("", &[pad(GUID), pad(GUID)], &Settings::new()).unwrap();
-        let mut rewritten = Settings::new();
-        for (key, value) in read_controls(&text) {
-            let value = if value.contains("engine:") {
-                value.split(',').rev().collect::<Vec<_>>().join(",")
-            } else {
-                value.into()
-            };
-            rewritten.insert(key.into(), value);
-        }
-        // Eden marks booleans equal to their default as default even when Romlin wrote false.
-        rewritten.insert("player_0_connected\\default".into(), "true".into());
-        let text = replace_settings(&text, "Controls", &rewritten);
-        let (text, _) = config_text(&text, &[pad([9; 16]), pad(GUID)], &previous).unwrap();
-        assert_eq!(
-            input(&text, "player_0_button_a")["guid"],
-            "09090000090909090909090909090909"
-        );
-        assert_eq!(
-            input(&text, "player_1_button_a")["guid"],
-            "030000005e0400008e02000014010000"
-        );
-        assert_eq!(setting(&text, "player_0_type"), "0");
-    }
-
-    #[test]
-    fn manual_changes_to_one_player_do_not_block_other_players() {
-        let (text, previous) = config_text("", &[pad(GUID), pad(GUID)], &Settings::new()).unwrap();
-        for change in [
-            ("player_0_button_a", "engine:keyboard,code:65"),
-            ("player_0_button_a\\default", "true"),
-            ("player_0_type", "3"),
-            ("player_0_profile_name", "My profile"),
-            ("player_8_button_b", "engine:keyboard,code:66"),
-        ] {
-            let custom = replace_settings(
-                &text,
-                "Controls",
-                &Settings::from([(change.0.into(), change.1.into())]),
-            );
-            let (next, managed) =
-                config_text(&custom, &[pad(GUID), pad([9; 16])], &previous).unwrap();
-            for (key, value) in read_controls(&custom) {
-                if key.starts_with("player_0_") || key.starts_with("player_8_") {
-                    assert_eq!(setting(&next, key), value, "{key}");
-                }
-            }
-            assert!(!managed.contains_key("player_0_type"));
-            assert_eq!(
-                input(&next, "player_1_button_a")["guid"],
-                "09090000090909090909090909090909"
-            );
-        }
-    }
-
-    #[test]
-    fn custom_player_two_is_preserved_while_player_one_is_configured() {
-        let existing = "[Controls]\nplayer_1_type=3\nplayer_1_type\\default=false\n\
-            player_1_button_a=engine:keyboard,code:65\nplayer_1_button_a\\default=false\n";
-        let (text, _) = config_text(existing, &[pad(GUID), pad(GUID)], &Settings::new()).unwrap();
-        assert_eq!(setting(&text, "player_0_connected"), "true");
-        assert_eq!(setting(&text, "player_1_type"), "3");
-        assert_eq!(input(&text, "player_1_button_a")["engine"], "keyboard");
-    }
-
-    #[test]
-    fn missing_mapping_still_reserves_its_sdl_port() {
-        let pads = [
-            SdlController {
-                guid: GUID,
-                mapping: None,
-            },
-            pad(GUID),
-        ];
-        let (text, _) = config_text("", &pads, &Settings::new()).unwrap();
-        assert_eq!(input(&text, "player_1_button_a")["port"], "1");
-        assert!(!text.contains("player_0_"));
-        assert!(config_text("", &[], &Settings::new()).is_none());
-    }
-
-    #[test]
-    fn deleted_config_can_be_rebuilt_despite_the_previous_snapshot() {
-        let (_, previous) = config_text("", &[pad(GUID)], &Settings::new()).unwrap();
-        let (text, _) = config_text("", &[pad([9; 16])], &previous).unwrap();
-        assert_eq!(
-            input(&text, "player_8_button_a")["guid"],
-            "09090000090909090909090909090909"
-        );
-    }
-
-    #[test]
-    fn corrupt_ownership_state_does_not_overwrite_controls() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = dir.path().join("user/config");
-        std::fs::create_dir_all(&config).unwrap();
-        std::fs::write(config.join("qt-config.ini"), "[Controls]\n").unwrap();
-        std::fs::write(config.join("romp-input.json"), "invalid json").unwrap();
-        assert!(prepare(&dir.path().join("eden"), &[pad(GUID)]).is_err());
-        assert_eq!(
-            std::fs::read_to_string(config.join("qt-config.ini")).unwrap(),
-            "[Controls]\n"
-        );
-    }
-
-    #[test]
-    fn translates_button_hat_and_signed_axis_bindings() {
-        assert_eq!(button("b12").as_deref(), Some("button:12"));
-        assert_eq!(button("h2.8").as_deref(), Some("hat:2,direction:left"));
-        assert_eq!(
-            button("-a3").as_deref(),
-            Some("axis:3,threshold:0.5,invert:-")
-        );
-        assert_eq!(
-            button("+a2").as_deref(),
-            Some("axis:2,threshold:0.5,invert:+")
-        );
-        assert_eq!(
-            button("a5~").as_deref(),
-            Some("axis:5,threshold:0.5,invert:-")
-        );
-        assert_eq!(axis("a1~"), Some((1, true)));
-        for invalid in ["", "b-1", "h0.3", "b1\n[Controls]", "a1,engine:keyboard"] {
-            assert!(button(invalid).is_none(), "{invalid}");
-        }
-    }
-
-    #[test]
-    fn config_read_errors_are_reported_without_replacing_the_config() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = dir.path().join("user/config/qt-config.ini");
-        std::fs::create_dir_all(&config).unwrap();
-        assert!(prepare(&dir.path().join("eden"), &[pad(GUID)]).is_err());
-        assert!(config.is_dir());
+        assert_eq!(control(&text, "player_8_connected"), "false");
     }
 }

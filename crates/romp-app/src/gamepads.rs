@@ -18,10 +18,19 @@ pub struct PadInfo {
     pub family: Family,
 }
 
-/// Raw SDL identity and bindings for configuring an external emulator.
-pub struct SdlController {
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SdlIdentity {
     pub guid: [u8; 16],
+    pub path: Option<String>,
+}
+
+/// Observed SDL data, before any external emulator's compatibility rules.
+#[derive(Clone)]
+pub struct SdlController {
+    pub identity: SdlIdentity,
     pub mapping: Option<String>,
+    pub last_active: Option<Instant>,
+    pub player_index: Option<u16>,
 }
 
 pub fn pad_keys(uuids: &[[u8; 16]], names: &[&str]) -> Vec<String> {
@@ -157,6 +166,7 @@ fn model_uuid(bus: u16, vendor: u16, product: u16, version: u16) -> [u8; 16] {
 
 struct Pad {
     id: JoystickId,
+    identity: SdlIdentity,
     uuid: [u8; 16],
     name: String,
     family: Family,
@@ -200,6 +210,7 @@ struct Sdl {
 
 impl Sdl {
     fn new() -> Result<Self, sdl3::Error> {
+        crate::eden::input::configure_sdl();
         sdl3::hint::set("SDL_NO_SIGNAL_HANDLERS", "1");
         sdl3::hint::set("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1");
         let context = sdl3::init()?;
@@ -241,8 +252,13 @@ impl Sdl {
         let name = gamepad.name().unwrap_or_else(|| "Controller".into());
         let family = family(gamepad.r#type());
         tracing::info!("controller connected: {name}");
+        let identity = SdlIdentity {
+            guid: self.subsystem.guid_for_id(id).raw().data,
+            path: gamepad.path(),
+        };
         self.pads.push(Pad {
             id,
+            identity,
             uuid,
             name,
             family,
@@ -255,7 +271,7 @@ impl Sdl {
 
 pub struct Gamepads {
     sdl: Option<Sdl>,
-    active: HashMap<JoystickId, Instant>,
+    active: HashMap<SdlIdentity, Instant>,
     presses: Vec<(JoystickId, Button)>,
 }
 
@@ -272,7 +288,9 @@ impl Gamepads {
     }
 
     fn pressed(&mut self, id: JoystickId, button: Button) {
-        self.active.insert(id, Instant::now());
+        if let Some(pad) = self.pads().iter().find(|pad| pad.id == id) {
+            self.active.insert(pad.identity.clone(), Instant::now());
+        }
         self.presses.push((id, button));
         if self.presses.len() > 32 {
             self.presses.remove(0);
@@ -341,10 +359,25 @@ impl Gamepads {
         sdl.pads
             .iter()
             .map(|pad| SdlController {
-                guid: sdl.subsystem.guid_for_id(pad.id).raw().data,
+                identity: pad.identity.clone(),
                 mapping: pad.gamepad.mapping(),
+                last_active: self.active.get(&pad.identity).copied(),
+                player_index: pad.gamepad.player_index(),
             })
             .collect()
+    }
+
+    pub fn suspend(&mut self) {
+        self.sdl.take();
+        self.presses.clear();
+    }
+
+    pub fn resume(&mut self) {
+        if self.sdl.is_none() {
+            self.sdl = Sdl::new()
+                .map_err(|e| tracing::warn!("gamepads unavailable: {e}"))
+                .ok();
+        }
     }
 
     pub fn states(&self, mappings: &Mappings, nintendo: bool) -> Vec<PadInput> {
@@ -375,7 +408,7 @@ impl Gamepads {
         self.connected()
             .into_iter()
             .zip(self.pads())
-            .max_by_key(|(_, pad)| self.active.get(&pad.id))
+            .max_by_key(|(_, pad)| self.active.get(&pad.identity))
             .map(|(info, pad)| mappings.family(mapping::model_of(&info.key), pad.family))
     }
 
@@ -395,7 +428,7 @@ impl Gamepads {
             .zip(self.pads())
             .filter(|(_, pad)| {
                 self.active
-                    .get(&pad.id)
+                    .get(&pad.identity)
                     .is_some_and(|t| now.duration_since(*t) < ACTIVE_FOR)
             })
             .map(|(key, _)| key)
@@ -444,6 +477,60 @@ mod controller_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn external_session_reapplies_hints_when_gamepads_resume() {
+        let hints = [
+            ("SDL_JOYSTICK_HIDAPI_XBOX", "0", "1"),
+            ("SDL_JOYSTICK_HIDAPI_COMBINE_JOY_CONS", "0", "1"),
+            ("SDL_JOYSTICK_HIDAPI_VERTICAL_JOY_CONS", "1", "0"),
+            ("SDL_GAMECONTROLLER_USE_BUTTON_LABELS", "0", "1"),
+        ];
+        let mut pads = Gamepads::new();
+        assert!(
+            pads.sdl.is_some(),
+            "SDL must initialize for the lifecycle test"
+        );
+        for (hint, expected, _) in hints {
+            assert_eq!(sdl3::hint::get(hint).as_deref(), Some(expected), "{hint}");
+        }
+        pads.suspend();
+        assert!(pads.sdl.is_none());
+        for (hint, _, other) in hints {
+            assert!(sdl3::hint::set(hint, other));
+        }
+        pads.resume();
+        assert!(
+            pads.sdl.is_some(),
+            "SDL must reopen after the external session"
+        );
+        for (hint, expected, _) in hints {
+            assert_eq!(sdl3::hint::get(hint).as_deref(), Some(expected), "{hint}");
+        }
+    }
+
+    #[test]
+    fn activity_survives_suspension_and_a_new_instance_id() {
+        let identity = SdlIdentity {
+            guid: [1; 16],
+            path: Some("/dev/input/event7".into()),
+        };
+        let when = Instant::now();
+        let mut pads = Gamepads {
+            sdl: None,
+            active: HashMap::from([(identity.clone(), when)]),
+            presses: Vec::new(),
+        };
+        pads.suspend();
+        // Reopening constructs the same identity independently of SDL's new instance ID.
+        let reopened = SdlIdentity {
+            guid: [1; 16],
+            path: Some("/dev/input/event7".into()),
+        };
+        assert_eq!(pads.active.get(&reopened), Some(&when));
+        pads.suspend(); // A failed launch must preserve it too.
+        assert_eq!(pads.active.get(&identity), Some(&when));
+    }
 
     #[test]
     fn identical_pads_get_distinct_keys_and_unknown_ids_use_the_name() {

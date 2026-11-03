@@ -240,8 +240,11 @@ Switch platform's firmware in RomM. The zip must contain
 launching the game. Use firmware and keys dumped from your own console; none are bundled.
 Games should be uncompressed `.nsp`, `.xci`, or `.nro` files supported by Eden.
 
-Eden runs outside Romlin's sandbox. Its portable `user` folder beside the installed
-executable holds firmware, keys and settings, separately from other Eden installations.
+Eden runs outside Romlin's sandbox. Its stable `cores/eden/user` folder (`cores/eden/runtime/user` on Windows)
+holds firmware, keys and settings, separately from other Eden installations and
+outside version directories. Existing portable data migrates automatically; conflicting
+files remain in `cores/eden/legacy-users/<version>` for recovery. Linux extracts the
+verified AppImage once and runs it without FUSE.
 Each game gets its own NAND in its Romlin save folder. Saves and user profiles sync
 to RomM as an Eden ZIP before playing and after closing Eden, using the same conflict
 choices and backups as other saves. Offline changes sync when the server returns.
@@ -252,26 +255,22 @@ Old saves in the shared portable `user/nand` folder are preserved, not automatic
 assigned to games. To import one, close Eden and copy only that title's save directory
 into the game's `eden-nand/user/save/...` directory, preserving its account/title path.
 The old user profiles are copied automatically when the game's NAND is first created.
-Romlin configures all connected gamepads in connection order, up to eight players,
-including their sticks, triggers and D-pads. One controller uses Handheld mode;
-two or more use separate Pro Controllers. Connect your controllers before launching
-the game. Romlin refreshes its own mappings on each launch, including replacements,
-and disconnects its unused player slots. A player you customize in Eden is left
-alone, including its controller type, bindings and input profile. Configure
-game-specific input profiles and other emulator options in Eden; Romlin passes its
-fullscreen preference.
+Romlin configures up to eight gamepads as Pro Controllers in docked mode. The pad
+used most recently in Romlin becomes Player 1; other pads keep their connection
+order. Steam's virtual gamepad takes precedence over the physical Deck pad it
+shadows. Connect controllers before launching and use a gamepad layout in Steam
+Input. Romlin replaces controller types, bindings and input profiles on every
+launch and disconnects unused slots. Missing controllers or mappings produce a
+notice. Romlin releases its controller handles while external emulators run and
+reopens them afterwards. Its fullscreen preference also follows Gaming Mode.
 macOS installation is not supported yet.
 
-If Pokémon: Let's Go, Pikachu! or Eevee! gets stuck at controller selection, stop
-the game and open Eden's **Emulation → Configure → Controls**. Connect Player 1,
-choose **Handheld** as the emulated controller, and select your actual controller
-as the input device to populate its bindings. On Steam Deck with Steam Input,
-this is usually **Steam Virtual Gamepad**. Apply the settings and relaunch the game.
-
-For Let's Go co-op, configure each player's emulated controller as a single Joy-Con
-in Eden instead of a Pro Controller, and set up the game's required motion inputs.
-You can save these as game-specific input profiles so other games keep their
-usual controls.
+Pokémon: Let's Go, Pikachu! and Eevee! require Handheld or a single Joy-Con rather
+than a Pro Controller. After launching, stop emulation in Eden and open
+**Emulation → Configure → Controls** to choose Handheld and your actual input
+device (usually **Steam Virtual Gamepad** with Steam Input), then start the game
+from Eden. For co-op, configure single Joy-Cons and the required motion inputs.
+These manual control settings are replaced on the next launch from Romlin.
 
 ## Attribution
 
