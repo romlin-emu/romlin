@@ -14,6 +14,10 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    ignore:
+      # Romlin hands glow types to librashader, so glow moves only when librashader does.
+      - dependency-name: glow
+        update-types: [version-update:semver-major, version-update:semver-minor]
     cooldown:
       default-days: 7
     groups:
