@@ -2350,6 +2350,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
 
 [[package]]
+name = "hidmaestro"
+version = "0.1.0"
+source = "git+https://github.com/auron-labs/hidmaestro-rs?rev=b0bb3a827c7448bc721d87574b6c46f7622f4513#b0bb3a827c7448bc721d87574b6c46f7622f4513"
+dependencies = [
+ "bitflags 2.13.2",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "hkdf"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5217,6 +5228,7 @@ dependencies = [
  "futures-util",
  "getrandom 0.4.3",
  "glow 0.17.0",
+ "hidmaestro",
  "httpdate",
  "image",
  "keyring",

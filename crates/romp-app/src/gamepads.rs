@@ -439,6 +439,9 @@ fn pad_state(pad: &Pad, mappings: &Mappings, model: &str) -> PadState {
 }
 
 #[cfg(test)]
+mod controller_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
