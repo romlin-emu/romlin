@@ -2,59 +2,128 @@ name: Release
 
 on:
   push:
+    branches: [main]
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing vX.Y.Z tag to recover (checks and packaging run again)
+        required: true
+        type: string
 
 permissions: {}
 
+# Draft creation, upload and publication must survive subsequent pushes.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
-  version:
+  release-please:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      sha: ${{ steps.release.outputs.sha }}
     steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0, release-please 17.6.0
+        id: release
+        with:
+          target-branch: main
+
+  prepare:
+    needs: release-please
+    if: >-
+      ${{ !cancelled() && (needs.release-please.outputs.release_created == 'true' ||
+          github.ref_type == 'tag' || github.event_name == 'workflow_dispatch') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.ref.outputs.tag }}
+      sha: ${{ steps.ref.outputs.sha }}
+      active: ${{ steps.draft.outputs.active }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Resolve the release commit
+        id: ref
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name || inputs.tag || github.ref_name }}
+          EXPECTED_SHA: ${{ needs.release-please.outputs.sha }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          sha=$(gh api "repos/$GH_REPO/commits/$TAG" --jq .sha)
+          [[ "$sha" =~ ^[a-f0-9]{40}$ ]]
+          if [ -n "$EXPECTED_SHA" ]; then test "$sha" = "$EXPECTED_SHA"; fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ steps.ref.outputs.sha }}
           persist-credentials: false
-      - name: Check the tag matches the crate version
-        run: |
-          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
-          test "${GITHUB_REF_NAME#v}" = "$version" || {
-            echo "::error::Tag $GITHUB_REF_NAME does not match version $version in Cargo.toml"
-            exit 1
-          }
+      - name: Validate version and prepare draft
+        id: draft
+        env:
+          TAG: ${{ steps.ref.outputs.tag }}
+          RELEASE_SHA: ${{ steps.ref.outputs.sha }}
+        run: python3 .github/release/release.py prepare "$TAG" "$RELEASE_SHA"
+
+  release-ci:
+    needs: prepare
+    if: ${{ !cancelled() && needs.prepare.result == 'success' && needs.prepare.outputs.active == 'true' }}
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
 
   build:
-    needs: version
+    needs: [prepare, release-ci]
+    if: ${{ !cancelled() && needs.release-ci.result == 'success' && needs.prepare.outputs.active == 'true' }}
     uses: ./.github/workflows/build.yml
     permissions:
       contents: read
     with:
-      version: ${{ github.ref_name }}
+      ref: ${{ needs.prepare.outputs.sha }}
+      version: ${{ needs.prepare.outputs.tag }}
 
   smoke:
-    needs: build
+    needs: [prepare, build]
+    if: ${{ !cancelled() && needs.build.result == 'success' }}
     uses: ./.github/workflows/smoke.yml
     permissions:
       contents: read
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+      build: false
+      version: ${{ needs.prepare.outputs.tag }}
 
   publish:
-    needs: [build, smoke]
+    needs: [prepare, release-ci, build, smoke]
+    if: ${{ !cancelled() && needs.release-ci.result == 'success' && needs.build.result == 'success' && needs.smoke.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ needs.prepare.outputs.sha }}
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: romlin-*
           path: dist
           merge-multiple: true
-      - name: Create the release
+      - name: Upload assets and publish latest
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-        run: |
-          make release-notes VERSION="${GITHUB_REF_NAME#v}" > notes.md
-          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "Romlin ${GITHUB_REF_NAME#v}" --notes-file notes.md
+          TAG: ${{ needs.prepare.outputs.tag }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.sha }}
+        run: python3 .github/release/release.py publish "$TAG" "$RELEASE_SHA"

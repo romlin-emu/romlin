@@ -5,13 +5,16 @@ on:
     branches: [main]
   workflow_dispatch:
 
-concurrency:
-  group: nightly
-  cancel-in-progress: true
-
 permissions: {}
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+    with:
+      ref: ${{ github.sha }}
+
   build:
     uses: ./.github/workflows/build.yml
     permissions:
@@ -20,7 +23,12 @@ jobs:
       version: nightly
 
   publish:
-    needs: build
+    if: github.ref == 'refs/heads/main'
+    # Build/check every push; only the rolling release replacement is serialized.
+    concurrency:
+      group: nightly-publish
+      cancel-in-progress: false
+    needs: [ci, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -35,6 +43,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          main_sha=$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq .object.sha)
+          if [ "$main_sha" != "$GITHUB_SHA" ]; then
+            echo "Skipping a nightly superseded by main at $main_sha"
+            exit 0
+          fi
           gh release delete nightly --yes --cleanup-tag || true
           gh release create nightly dist/* \
             --prerelease \
