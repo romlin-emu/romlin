@@ -6,6 +6,9 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+controller-hidmaestro = ["dep:hidmaestro"]
+
 [[bin]]
 name = "romlin"
 path = "src/main.rs"
@@ -70,6 +73,7 @@ libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_System_Threading"] }
+hidmaestro = { git = "https://github.com/auron-labs/hidmaestro-rs", rev = "b0bb3a827c7448bc721d87574b6c46f7622f4513", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
