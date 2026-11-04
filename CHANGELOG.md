@@ -2,6 +2,14 @@
 
 Romlin continues the upstream RomP release history below. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Romlin uses [semantic versioning](https://semver.org/).
 
+## [0.19.1](https://github.com/romlin-emu/romlin/compare/v0.19.0...v0.19.1) (2026-11-04)
+
+
+### Bug Fixes
+
+* **eden:** make controllers work on SteamOS and keep Eden data across updates ([164efd5](https://github.com/romlin-emu/romlin/commit/164efd53d67b542f4249d759be03c15495511dea))
+* resolve Windows lint and serialize SDL controller tests ([#7](https://github.com/romlin-emu/romlin/issues/7)) ([bb2e343](https://github.com/romlin-emu/romlin/commit/bb2e3438f1889b700a8da2276221273dc120a13f))
+
 ## [Unreleased]
 
 ### Added
