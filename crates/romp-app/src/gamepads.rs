@@ -474,12 +474,17 @@ fn pad_state(pad: &Pad, mappings: &Mappings, model: &str) -> PadState {
 #[cfg(test)]
 mod controller_tests;
 
+// SDL's context, event pump and hints are process-global, including during teardown.
+#[cfg(test)]
+static SDL_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn external_session_reapplies_hints_when_gamepads_resume() {
+        let _serial = SDL_TEST_LOCK.lock().unwrap();
         let hints = [
             ("SDL_JOYSTICK_HIDAPI_XBOX", "0", "1"),
             ("SDL_JOYSTICK_HIDAPI_COMBINE_JOY_CONS", "0", "1"),
