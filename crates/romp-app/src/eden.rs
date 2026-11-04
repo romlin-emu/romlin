@@ -279,7 +279,7 @@ pub fn ready(exe: PathBuf) -> Result<PathBuf, String> {
             return Ok(exe);
         }
         prepare_runtime(version, &runtime)?;
-        return Ok(runtime.join("eden.exe"));
+        Ok(runtime.join("eden.exe"))
     }
     #[cfg(not(windows))]
     Ok(exe)
