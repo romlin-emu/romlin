@@ -26,6 +26,7 @@ fn state(pads: &Gamepads, key: &str, mappings: &Mappings) -> PadInput {
 fn sdl_virtual_controller_reaches_game_input() -> anyhow::Result<()> {
     use sdl3::joystick::{JoystickType, VirtualJoystickDescription};
 
+    let _serial = SDL_TEST_LOCK.lock().unwrap();
     let mut pads = Gamepads::new();
     let sdl = pads.sdl.as_ref().context("SDL initialization failed")?;
     let joysticks = sdl._context.joystick()?;
@@ -144,6 +145,7 @@ fn sdl_virtual_controller_reaches_game_input() -> anyhow::Result<()> {
 fn hidmaestro_controller_reaches_sdl() -> anyhow::Result<()> {
     use hidmaestro::{Buttons, HidMaestro, StandardAxes};
 
+    let _serial = SDL_TEST_LOCK.lock().unwrap();
     let pipe = std::env::var("HIDMAESTRO_PIPE_NAME")
         .context("set HIDMAESTRO_PIPE_NAME to an already-running dedicated broker")?;
     ensure!(!pipe.is_empty(), "HIDMAESTRO_PIPE_NAME must not be empty");
