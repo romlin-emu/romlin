@@ -255,6 +255,18 @@ impl Store {
                  COMMIT;",
             )?;
         }
+        if version < 12 {
+            conn.execute_batch(
+                "BEGIN;
+                 CREATE INDEX games_title ON games(title COLLATE NOCASE);
+                 CREATE INDEX games_added ON games(added_at IS NULL, added_at DESC, title COLLATE NOCASE);
+                 CREATE INDEX games_last_played ON games(last_played IS NULL, last_played DESC, title COLLATE NOCASE);
+                 DROP INDEX IF EXISTS collection_roms_rom;
+                 CREATE INDEX collection_roms_rom_key ON collection_roms(rom_id, key);
+                 PRAGMA user_version = 12;
+                 COMMIT;",
+            )?;
+        }
         Ok(Self { conn })
     }
 
@@ -1198,6 +1210,42 @@ mod tests {
     }
 
     #[test]
+    fn migrating_v11_preserves_games_and_collection_membership() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("v11.db");
+        let mut s = Store::open(&path).unwrap();
+        s.upsert_games(&[rom(10, 1, "Game", "t")]);
+        s.set_local_path(10, Some("/games/game.rom"));
+        s.conn
+            .execute_batch(
+                "INSERT INTO collection_roms VALUES ('favorites', 10);
+             DROP INDEX games_title; DROP INDEX games_added; DROP INDEX games_last_played;
+             DROP INDEX collection_roms_rom_key;
+             CREATE INDEX collection_roms_rom ON collection_roms(rom_id);
+             PRAGMA user_version = 11;",
+            )
+            .unwrap();
+        drop(s);
+
+        let s = Store::open(&path).unwrap();
+        assert_eq!(
+            s.game(10).unwrap().local_path.as_deref(),
+            Some("/games/game.rom")
+        );
+        let key: String = s
+            .conn
+            .query_row(
+                "SELECT key FROM collection_roms WHERE rom_id = 10 ORDER BY key",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(key, "favorites");
+        drop(s);
+        Store::open(&path).unwrap();
+    }
+
+    #[test]
     fn downloaded_only_platform_counts() {
         let mut s = seeded();
         s.set_local_path(10, Some("/x"));
@@ -1383,7 +1431,9 @@ mod tests {
             s.set("last_sync_at", "t");
             s.conn
                 .execute_batch(
-                    "ALTER TABLE games DROP COLUMN meta; ALTER TABLE games DROP COLUMN screenshots;
+                    "DROP INDEX games_title; DROP INDEX games_added; DROP INDEX games_last_played;
+                     DROP INDEX collection_roms_rom_key;
+                     ALTER TABLE games DROP COLUMN meta; ALTER TABLE games DROP COLUMN screenshots;
                      ALTER TABLE games DROP COLUMN added_at; ALTER TABLE games DROP COLUMN last_played;
                      ALTER TABLE platforms DROP COLUMN category;
                      ALTER TABLE platforms DROP COLUMN aliases; PRAGMA user_version = 2;",

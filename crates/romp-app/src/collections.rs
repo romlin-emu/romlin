@@ -1,7 +1,10 @@
 use crate::romm::client::{Client, Error};
 use crate::romm::types::RemoteCollection;
 use crate::store::{CollectionKind, CollectionRecord, Store};
-use std::sync::Mutex;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Mutex,
+};
 
 pub const AUTO: [(&str, CollectionKind); 3] = [
     ("collection", CollectionKind::Series),
@@ -54,7 +57,11 @@ pub fn records(
     out
 }
 
-pub async fn sync_collections(client: &Client, store: &Mutex<Store>) -> Result<(), Error> {
+pub async fn sync_collections(
+    client: &Client,
+    store: &Mutex<Store>,
+    cancel: &AtomicBool,
+) -> Result<(), Error> {
     let user_id = client.me().await?.id;
     let regular = client.collections().await?;
     let smart = client.smart_collections().await?;
@@ -63,7 +70,11 @@ pub async fn sync_collections(client: &Client, store: &Mutex<Store>) -> Result<(
         auto.push((kind, client.virtual_collections(kind_name).await?));
     }
     let records = records(user_id, regular, smart, auto);
-    store.lock().unwrap().replace_collections(&records);
+    let mut store = store.lock().unwrap();
+    if cancel.load(Ordering::SeqCst) {
+        return Err(Error::Cancelled);
+    }
+    store.replace_collections(&records);
     Ok(())
 }
 
@@ -166,7 +177,9 @@ mod tests {
             .unwrap()
             .upsert_games(&[crate::romm::types::rom(7, 1, "Game", "t")]);
         let client = Client::new(base_of(&server, "/")).with_token("t".into());
-        sync_collections(&client, &store).await.unwrap();
+        sync_collections(&client, &store, &AtomicBool::new(false))
+            .await
+            .unwrap();
         let kinds: Vec<_> = store
             .lock()
             .unwrap()
@@ -183,5 +196,11 @@ mod tests {
                 CollectionKind::Genre
             ]
         );
+        store.lock().unwrap().replace_collections(&[]);
+        assert!(matches!(
+            sync_collections(&client, &store, &AtomicBool::new(true)).await,
+            Err(Error::Cancelled)
+        ));
+        assert!(store.lock().unwrap().collections(false).is_empty());
     }
 }

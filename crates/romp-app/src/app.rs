@@ -40,6 +40,7 @@ use tr::tr;
 
 const PARALLEL_DOWNLOADS: usize = 6;
 const OFFLINE_RETRY: Duration = Duration::from_secs(60);
+const LIBRARY_REFRESH: Duration = Duration::from_secs(5 * 60);
 const RESTORE_SCROLL_FOR: Duration = Duration::from_secs(3);
 const SORT_KEY: &str = "sort";
 
@@ -95,14 +96,44 @@ struct Pairing {
     countdown: Option<Timer>,
 }
 
+#[derive(Default)]
+struct SyncState {
+    generation: u64,
+    in_flight: bool,
+}
+
+impl SyncState {
+    fn start(&mut self) -> Option<u64> {
+        if self.in_flight {
+            return None;
+        }
+        self.in_flight = true;
+        self.generation += 1;
+        Some(self.generation)
+    }
+    fn stop(&mut self) {
+        self.generation += 1;
+        self.in_flight = false;
+    }
+    fn finish(&mut self, generation: u64) -> bool {
+        if !self.in_flight || self.generation != generation {
+            return false;
+        }
+        self.in_flight = false;
+        true
+    }
+}
+
 struct Controller {
     shared: Shared,
     ui: Weak<AppWindow>,
     pairing: RefCell<Pairing>,
     client: RefCell<Option<Client>>,
     library: RefCell<Library>,
-    sync_generation: Cell<u64>,
+    sync_state: RefCell<SyncState>,
+    session_generation: Cell<u64>,
     sync_cancel: RefCell<Arc<AtomicBool>>,
+    library_refresh: RefCell<Option<Timer>>,
     game: RefCell<Option<game::GameState>>,
     downloading: RefCell<Option<(i64, Arc<AtomicBool>, game::Origin)>>,
     device_socket: RefCell<Option<crate::romm::device_socket::DeviceSocket>>,
@@ -208,8 +239,10 @@ pub fn run(game_mode: bool) -> anyhow::Result<()> {
         pairing: RefCell::default(),
         client: RefCell::new(None),
         library: RefCell::default(),
-        sync_generation: Cell::new(0),
+        sync_state: RefCell::default(),
+        session_generation: Cell::new(0),
         sync_cancel: RefCell::default(),
+        library_refresh: RefCell::new(None),
         game: RefCell::new(None),
         downloading: RefCell::new(None),
         device_socket: RefCell::new(None),
@@ -581,6 +614,15 @@ impl Controller {
         }
         *self.client.borrow_mut() = Some(client.clone());
         self.set_offline(false);
+        let timer = Timer::default();
+        timer.start(TimerMode::Repeated, LIBRARY_REFRESH, || {
+            with_controller(|c| {
+                if !c.offline.get() {
+                    c.start_sync(true);
+                }
+            });
+        });
+        *self.library_refresh.borrow_mut() = Some(timer);
         let restore = self.restore_view.borrow_mut().take();
         let selected = restore
             .as_ref()
@@ -619,9 +661,14 @@ impl Controller {
             self.open_game(id);
         }
         self.sync();
+        let session = self.session_generation.get();
         self.shared.rt.spawn(async move {
             let me = client.me().await;
-            on_ui(move |c| c.signed_in(me));
+            on_ui(move |c| {
+                if c.session_generation.get() == session {
+                    c.signed_in(me);
+                }
+            });
         });
     }
 
@@ -732,6 +779,9 @@ impl Controller {
     }
 
     fn needs_repair(&self) {
+        *self.library_refresh.borrow_mut() = None;
+        *self.offline_retry.borrow_mut() = None;
+        self.stop_sync();
         let Some(ui) = self.ui() else { return };
         ui.set_connect_error(
             tr!("This device was signed out by the server. Pair it again to continue.").into(),
@@ -741,7 +791,9 @@ impl Controller {
 
     fn stop_sync(&self) {
         self.sync_cancel.borrow().store(true, Ordering::SeqCst);
-        self.sync_generation.set(self.sync_generation.get() + 1);
+        self.sync_state.borrow_mut().stop();
+        self.session_generation
+            .set(self.session_generation.get() + 1);
         if let Some(ui) = self.ui() {
             ui.set_syncing(false);
             ui.set_sync_status("".into());
@@ -787,6 +839,7 @@ impl Controller {
     }
 
     fn sign_out(&self) {
+        *self.library_refresh.borrow_mut() = None;
         self.close_installs();
         self.clear_conflict();
         self.stop_sync();
@@ -1085,17 +1138,21 @@ impl Controller {
     }
 
     fn sync(&self) {
+        self.start_sync(false);
+    }
+
+    fn start_sync(&self, quiet: bool) {
         let Some(client) = self.client.borrow().clone() else {
             return;
         };
         let Some(ui) = self.ui() else { return };
-        if ui.get_syncing() {
+        let Some(generation) = self.sync_state.borrow_mut().start() else {
             return;
+        };
+        if !quiet {
+            ui.set_syncing(true);
+            ui.set_sync_status(tr!("Syncing…").into());
         }
-        ui.set_syncing(true);
-        ui.set_sync_status(tr!("Syncing…").into());
-        let generation = self.sync_generation.get() + 1;
-        self.sync_generation.set(generation);
         let cancel = Arc::new(AtomicBool::new(false));
         *self.sync_cancel.borrow_mut() = cancel.clone();
         let store = self.shared.store.clone();
@@ -1103,7 +1160,8 @@ impl Controller {
         self.shared.rt.spawn(async move {
             let result = sync_library(&client, &store, PAGE_SIZE, &cancel).await;
             if result.is_ok() && collections && !cancel.load(Ordering::SeqCst) {
-                if let Err(e) = crate::collections::sync_collections(&client, &store).await {
+                if let Err(e) = crate::collections::sync_collections(&client, &store, &cancel).await
+                {
                     tracing::warn!("syncing collections: {e}");
                 }
             }
@@ -1118,7 +1176,7 @@ impl Controller {
     }
 
     fn sync_finished(&self, generation: u64, result: Result<SyncReport, Error>) {
-        if generation != self.sync_generation.get() {
+        if !self.sync_state.borrow_mut().finish(generation) {
             return;
         }
         let Some(ui) = self.ui() else { return };
@@ -1199,5 +1257,23 @@ async fn poll_until_done(client: Client, auth: DeviceAuth) {
                 return;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod sync_state_tests {
+    use super::SyncState;
+    #[test]
+    fn overlap_cancel_and_late_completion() {
+        let mut state = SyncState::default();
+        let first = state.start().unwrap();
+        assert!(state.start().is_none());
+        state.stop();
+        let next = state.start().unwrap();
+        assert!(!state.finish(first));
+        assert!(state.start().is_none());
+        assert!(state.finish(next));
+        assert!(!state.finish(next));
+        assert!(state.start().is_some());
     }
 }
