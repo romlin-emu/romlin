@@ -317,6 +317,21 @@ fn config_text(existing: &str, observed: &[SdlController]) -> (String, Prepared)
             ("use_docked_mode\\default".into(), "false".into()),
         ]),
     );
+    // Select+Start asks to close Eden, returning to Romlin; Stop and Restart contain that chord.
+    let mut ui = Settings::from([
+        ("confirmStop".into(), "0".into()),
+        ("confirmStop\\default".into(), "false".into()),
+    ]);
+    for (action, chord) in [
+        ("Exit%20Eden", "Plus+Minus"),
+        ("Stop%20Emulation", ""),
+        ("Restart%20Emulation", ""),
+    ] {
+        let key = format!("Shortcuts\\Main%20Window\\{action}\\Controller_KeySeq");
+        ui.insert(format!("{key}\\default"), "false".into());
+        ui.insert(key, chord.into());
+    }
+    let text = replace_settings(&text, "UI", &ui);
     (
         text,
         Prepared {
@@ -416,7 +431,13 @@ mod tests {
     #[test]
     fn steam_bindings_are_exact_and_repeated_writes_preserve_other_settings() {
         let pads = [pad("0300abcdde280000ff11000001000000", STEAM)];
-        let original = "[Renderer]\nbackend=1\n[Controls]\nplayer_0_profile_name=custom\nenable_procon_driver=true\nenable_procon_driver\\default=true\nenable_joycon_driver=true\n";
+        let original = "[Renderer]\nbackend=1\n[Controls]\nplayer_0_profile_name=custom\nenable_procon_driver=true\nenable_procon_driver\\default=true\nenable_joycon_driver=true\n\
+            [UI]\nfullscreen=true\n\
+            Shortcuts\\Main%20Window\\Exit%20Eden\\Controller_KeySeq=Home+Minus\n\
+            Shortcuts\\Main%20Window\\Exit%20Eden\\Controller_KeySeq\\default=true\n\
+            Shortcuts\\Main%20Window\\Stop%20Emulation\\Controller_KeySeq=L+Plus+Minus\n\
+            Shortcuts\\Main%20Window\\Restart%20Emulation\\Controller_KeySeq=R+Plus+Minus\n\
+            confirmStop=2\nconfirmStop\\default=true\n";
         let (text, result) = config_text(original, &pads);
         assert!(!result.missing);
         assert!(result.steam_virtual);
@@ -453,8 +474,27 @@ mod tests {
             setting(&text, "System", "use_docked_mode\\default"),
             "false"
         );
+        assert_eq!(setting(&text, "UI", "fullscreen"), "true");
+        for (key, value) in [
+            (
+                "Shortcuts\\Main%20Window\\Exit%20Eden\\Controller_KeySeq",
+                "Plus+Minus",
+            ),
+            (
+                "Shortcuts\\Main%20Window\\Stop%20Emulation\\Controller_KeySeq",
+                "",
+            ),
+            (
+                "Shortcuts\\Main%20Window\\Restart%20Emulation\\Controller_KeySeq",
+                "",
+            ),
+            ("confirmStop", "0"),
+        ] {
+            assert_eq!(setting(&text, "UI", key), value);
+            assert_eq!(setting(&text, "UI", &format!("{key}\\default")), "false");
+        }
         assert_eq!(config_text(&text, &pads).0, text);
-        for section in ["Controls", "System", "Renderer"] {
+        for section in ["Controls", "System", "Renderer", "UI"] {
             assert_eq!(text.matches(&format!("[{section}]")).count(), 1);
         }
     }
