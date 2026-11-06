@@ -100,6 +100,7 @@ pub const RETRO_ENVIRONMENT_SET_DISK_CONTROL_INTERFACE: c_uint = 13;
 pub const RETRO_ENVIRONMENT_GET_DISK_CONTROL_INTERFACE_VERSION: c_uint = 57;
 pub const RETRO_ENVIRONMENT_SET_DISK_CONTROL_EXT_INTERFACE: c_uint = 58;
 pub const RETRO_ENVIRONMENT_GET_VFS_INTERFACE: c_uint = 45 | 0x10000;
+pub const RETRO_ENVIRONMENT_GET_MICROPHONE_INTERFACE: c_uint = 75 | 0x10000;
 
 pub const RETRO_HW_CONTEXT_NONE: u32 = 0;
 pub const RETRO_HW_CONTEXT_OPENGL: u32 = 1;
@@ -311,6 +312,42 @@ pub struct retro_core_options_v2_intl {
 #[repr(C)]
 pub struct retro_log_callback {
     pub log: retro_log_printf_t,
+}
+
+pub const RETRO_MICROPHONE_INTERFACE_VERSION: c_uint = 1;
+
+pub enum retro_microphone {}
+
+#[repr(C)]
+pub struct retro_microphone_params {
+    pub rate: c_uint,
+}
+
+pub type retro_open_mic_t =
+    unsafe extern "C" fn(params: *const retro_microphone_params) -> *mut retro_microphone;
+pub type retro_close_mic_t = unsafe extern "C" fn(microphone: *mut retro_microphone);
+pub type retro_get_mic_params_t = unsafe extern "C" fn(
+    microphone: *const retro_microphone,
+    params: *mut retro_microphone_params,
+) -> bool;
+pub type retro_set_mic_state_t =
+    unsafe extern "C" fn(microphone: *mut retro_microphone, state: bool) -> bool;
+pub type retro_get_mic_state_t = unsafe extern "C" fn(microphone: *const retro_microphone) -> bool;
+pub type retro_read_mic_t = unsafe extern "C" fn(
+    microphone: *mut retro_microphone,
+    samples: *mut i16,
+    num_samples: usize,
+) -> c_int;
+
+#[repr(C)]
+pub struct retro_microphone_interface {
+    pub interface_version: c_uint,
+    pub open_mic: Option<retro_open_mic_t>,
+    pub close_mic: Option<retro_close_mic_t>,
+    pub get_params: Option<retro_get_mic_params_t>,
+    pub set_mic_state: Option<retro_set_mic_state_t>,
+    pub get_mic_state: Option<retro_get_mic_state_t>,
+    pub read_mic: Option<retro_read_mic_t>,
 }
 
 pub type retro_environment_t = unsafe extern "C" fn(cmd: c_uint, data: *mut c_void) -> bool;

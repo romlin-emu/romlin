@@ -33,6 +33,8 @@ pub struct SessionConfig {
     pub volume: u8,
     pub auto_state: bool,
     pub options: Vec<(String, String)>,
+    /// The USB product string of the microphone the game reads, if one is plugged in.
+    pub microphone: Option<String>,
 }
 
 #[derive(Debug)]
@@ -86,6 +88,10 @@ pub fn runner_args(cfg: &SessionConfig, socket: &Path, frames: &str) -> Vec<OsSt
     for (key, value) in &cfg.options {
         args.push("--option".into());
         args.push(format!("{key}={value}").into());
+    }
+    if let Some(product) = &cfg.microphone {
+        args.push("--microphone".into());
+        args.push(product.into());
     }
     args
 }
@@ -283,6 +289,7 @@ mod tests {
             volume: 100,
             auto_state: true,
             options: Vec::new(),
+            microphone: None,
         }
     }
 
@@ -316,6 +323,20 @@ mod tests {
         .map(OsString::from)
         .collect();
         assert_eq!(args, expected);
+    }
+
+    #[test]
+    fn the_microphone_is_passed_by_product_string() {
+        let mut cfg = config("/bin/runner".into());
+        let microphone = |cfg: &SessionConfig| {
+            let args = runner_args(cfg, Path::new("/tmp/c.sock"), "/romlin-1");
+            args.iter()
+                .position(|a| a == "--microphone")
+                .map(|i| args[i + 1].clone())
+        };
+        assert_eq!(microphone(&cfg), None);
+        cfg.microphone = Some("USBMIC Serial".into());
+        assert_eq!(microphone(&cfg), Some("USBMIC Serial".into()));
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use crate::accessories::{buzz, Accessory};
 use crate::gamepads::Gamepads;
 use crate::input::{self, map_key, Command, Controls, KeyAction};
 use crate::mapping::{Hotkey, Mappings};
@@ -43,6 +44,8 @@ pub struct GameOptions {
     pub jit: bool,
     pub vulkan: bool,
     pub options: Vec<(String, String)>,
+    pub accessory: Option<Accessory>,
+    pub microphone: Option<String>,
     pub split_screens: bool,
     pub gamepads: Rc<RefCell<Gamepads>>,
     pub players: Rc<RefCell<Assignments>>,
@@ -167,6 +170,8 @@ pub fn run(
             jit,
             vulkan,
             options: Vec::new(),
+            accessory: None,
+            microphone: None,
             split_screens: false,
             gamepads: Rc::new(RefCell::new(Gamepads::new())),
             players: Rc::default(),
@@ -239,6 +244,8 @@ struct Game {
     achievements_focus: Cell<i32>,
     save_placement: SavePlacement,
     computer: bool,
+    /// A SingStar game started without its microphone adapter, so it hears silence.
+    mic_missing: bool,
     held_keys: RefCell<HashSet<u32>>,
     modifiers: Cell<u16>,
     rotation: Cell<u8>,
@@ -1331,6 +1338,7 @@ pub fn launch(
 ) -> anyhow::Result<RunningGame> {
     let hardcore = opts.achievements.as_ref().is_some_and(|a| a.hardcore);
     let tracks_achievements = opts.achievements.is_some();
+    let mic_missing = opts.accessory == Some(Accessory::SingStar) && opts.microphone.is_none();
     let cfg = SessionConfig {
         title: opts.title.clone(),
         runner: paths::runner_exe()?,
@@ -1344,6 +1352,7 @@ pub fn launch(
         options: opts.options,
         volume: opts.prefs.volume,
         auto_state: opts.auto_state,
+        microphone: opts.microphone,
     };
     let session = Session::start(&cfg)?;
     let states = opts.states;
@@ -1440,6 +1449,7 @@ pub fn launch(
             achievements_focus: Cell::new(0),
             save_placement: opts.save_placement,
             computer: opts.computer,
+            mic_missing,
             held_keys: RefCell::default(),
             modifiers: Cell::new(0),
             rotation: Cell::new(0),
@@ -1490,6 +1500,7 @@ pub fn launch(
         let players = opts.players.clone();
         let mappings = opts.mappings.clone();
         let nintendo = opts.nintendo;
+        let buzz_handsets = opts.accessory == Some(Accessory::Buzz);
         let mut known: HashSet<String> = HashSet::new();
         let mut first_poll = true;
         let resumed = opts.load_slot == Some(0);
@@ -1534,10 +1545,20 @@ pub fn launch(
                 if ui.get_guide_name() != guide.as_str() {
                     ui.set_guide_name(guide.into());
                 }
-                let states = inputs
+                let mut states: Vec<_> = inputs
                     .iter()
                     .map(|p| (players.player(&p.key), p.state))
                     .collect();
+                if buzz_handsets {
+                    if let Some(masks) = pads.buzz_handsets() {
+                        states.extend(
+                            masks
+                                .into_iter()
+                                .enumerate()
+                                .map(|(h, mask)| (Some(h as u8 + 1), buzz::pad(mask))),
+                        );
+                    }
+                }
                 (inputs, states)
             };
             game.pads(&inputs);
@@ -1697,6 +1718,12 @@ pub fn launch(
                     flash(
                         ui,
                         tr!("Your keyboard goes to the game. Press {key} for the menu.", key = "F12"),
+                    );
+                }
+                if started_now && game.mic_missing {
+                    flash(
+                        ui,
+                        tr!("No SingStar adapter is connected, so the game hears silence. Plug one in and start the game again."),
                     );
                 }
             }

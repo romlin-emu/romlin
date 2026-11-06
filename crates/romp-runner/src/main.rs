@@ -7,7 +7,7 @@ use romlin_runner::achievements::Achievements;
 use romlin_runner::frontend::Frontend;
 use romlin_runner::ipc::Link;
 use romlin_runner::state::{self, StateManager};
-use romlin_runner::{archive, audio, hw_gl, hw_vulkan, perf, sandbox};
+use romlin_runner::{archive, audio, hw_gl, hw_vulkan, mic, perf, sandbox};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tracing::{info, warn};
@@ -43,6 +43,9 @@ struct Args {
     no_auto_state: bool,
     #[arg(long = "option", value_parser = parse_option)]
     options: Vec<(String, String)>,
+    /// The USB product string of the microphone to give the core; see `mic::install`.
+    #[arg(long)]
+    microphone: Option<String>,
 }
 
 fn send_discs(link: &Link, core: &mut lr::Core, frontend: &mut Frontend) {
@@ -158,6 +161,9 @@ fn run(args: &Args, frontend: &mut Frontend, link: &Link) -> anyhow::Result<()> 
         };
     }
 
+    if let Some(product) = &args.microphone {
+        mic::install(product);
+    }
     archive::remove_stale_scratch(&std::env::temp_dir());
     apply_sandbox(args, vulkan_library.as_deref())?;
 
@@ -498,6 +504,7 @@ fn run(args: &Args, frontend: &mut Frontend, link: &Link) -> anyhow::Result<()> 
     }
     core.unload_game(frontend);
     lr::uninstall_hw_provider();
+    lr::uninstall_microphone_provider();
     drop(core);
     let _ = std::fs::remove_dir_all(archive::scratch_dir(&session_tag));
     Ok(())
