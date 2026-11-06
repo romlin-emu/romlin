@@ -1,11 +1,12 @@
+use crate::accessories::{self, buzz};
 use crate::input;
 use crate::mapping::{self, Mappings, BUTTONS};
 use crate::pad_labels::Family;
 use romlin_proto::msg::PadState;
 use sdl3::event::Event;
 use sdl3::gamepad::{Axis, Button as SdlButton, GamepadType};
-use sdl3::joystick::JoystickId;
-use sdl3::{EventPump, GamepadSubsystem};
+use sdl3::joystick::{Joystick, JoystickId};
+use sdl3::{EventPump, GamepadSubsystem, JoystickSubsystem};
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -201,10 +202,18 @@ impl Pad {
     }
 }
 
+/// A Buzz! receiver, read as a joystick: its buttons are the handsets' buttons.
+struct Receiver {
+    id: JoystickId,
+    joystick: Joystick,
+}
+
 struct Sdl {
     pads: Vec<Pad>,
+    receivers: Vec<Receiver>,
     events: EventPump,
     subsystem: GamepadSubsystem,
+    joysticks: JoystickSubsystem,
     _context: sdl3::Sdl,
 }
 
@@ -215,21 +224,65 @@ impl Sdl {
         sdl3::hint::set("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1");
         let context = sdl3::init()?;
         let subsystem = context.gamepad()?;
+        let joysticks = context.joystick()?;
         let events = context.event_pump()?;
         let mut sdl = Self {
             pads: Vec::new(),
+            receivers: Vec::new(),
             events,
             subsystem,
+            joysticks,
             _context: context,
         };
         for id in sdl.subsystem.gamepads()? {
             sdl.open(id);
         }
+        for id in sdl.joysticks.joysticks()? {
+            sdl.open_receiver(id);
+        }
         Ok(sdl)
     }
 
+    fn is_buzz_receiver(&self, id: JoystickId) -> bool {
+        match (
+            self.subsystem.vendor_for_id(id),
+            self.subsystem.product_for_id(id),
+        ) {
+            (Some(vendor), Some(product)) => accessories::is_buzz_receiver(vendor, product),
+            _ => false,
+        }
+    }
+
+    fn open_receiver(&mut self, id: JoystickId) {
+        if self.receivers.iter().any(|r| r.id == id) || !self.is_buzz_receiver(id) {
+            return;
+        }
+        match self.joysticks.open(id) {
+            Ok(joystick) => {
+                tracing::info!("Buzz! receiver connected");
+                self.receivers.push(Receiver { id, joystick });
+            }
+            Err(e) => tracing::warn!("couldn't open the Buzz! receiver: {e}"),
+        }
+    }
+
+    /// Four handsets' buttons, one 5-bit mask each, when a receiver is plugged in.
+    fn buzz_handsets(&self) -> Option<[u8; 4]> {
+        let receiver = self.receivers.first()?;
+        let handset = |h: u32| {
+            (0..buzz::BUTTONS).fold(0, |mask, bit| {
+                let pressed = receiver
+                    .joystick
+                    .button(h * buzz::BUTTONS + bit)
+                    .unwrap_or(false);
+                mask | u8::from(pressed) << bit
+            })
+        };
+        Some(std::array::from_fn(|h| handset(h as u32)))
+    }
+
     fn open(&mut self, id: JoystickId) {
-        if self.pads.iter().any(|p| p.id == id) {
+        if self.pads.iter().any(|p| p.id == id) || self.is_buzz_receiver(id) {
             return;
         }
         let gamepad = match self.subsystem.open(id) {
@@ -307,6 +360,8 @@ impl Gamepads {
             match event {
                 Event::GamepadAdded { which, .. } => sdl.open(which),
                 Event::GamepadRemoved { which, .. } => sdl.pads.retain(|p| p.id != which),
+                Event::JoyDeviceAdded { which, .. } => sdl.open_receiver(which),
+                Event::JoyDeviceRemoved { which, .. } => sdl.receivers.retain(|r| r.id != which),
                 Event::GamepadButtonDown { which, button, .. } => {
                     if let Some(button) = from_sdl(button) {
                         pressed.push((which, button));
@@ -365,6 +420,11 @@ impl Gamepads {
                 player_index: pad.gamepad.player_index(),
             })
             .collect()
+    }
+
+    /// The Buzz! handsets' buttons, when a receiver is plugged in; see `buzz::pad`.
+    pub fn buzz_handsets(&self) -> Option<[u8; 4]> {
+        self.sdl.as_ref()?.buzz_handsets()
     }
 
     pub fn suspend(&mut self) {

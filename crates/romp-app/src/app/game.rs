@@ -1,5 +1,6 @@
 use super::save_sync::PendingLaunch;
 use super::{on_ui, with_controller, Controller, SCREEN_GAME, SCREEN_LIBRARY, SCREEN_SETTINGS};
+use crate::accessories::{self, Accessory};
 use crate::bios;
 use crate::cores::core_for_platform;
 use crate::details;
@@ -1294,6 +1295,13 @@ impl Controller {
                 && save_dir.join(crate::saves::AUTO_STATE).exists())
             .then_some(0)
         });
+        let accessory = core_for_platform(&detail.platform_slug)
+            .filter(|core| core.id == "pcsx2")
+            .and_then(|_| accessories::ps2_accessory(&detail, &rom));
+        let microphone = match accessory {
+            Some(Accessory::SingStar) => accessories::singstar_adapter(),
+            _ => None,
+        };
         let options = GameOptions {
             core,
             rom,
@@ -1302,6 +1310,8 @@ impl Controller {
             jit,
             vulkan: core_for_platform(&detail.platform_slug)
                 .is_some_and(|core| crate::cores::uses_vulkan(core.id)),
+            accessory,
+            microphone,
             options: core_for_platform(&detail.platform_slug)
                 .map(|core| {
                     let mut options = crate::cores::with_platform_options(
@@ -1311,6 +1321,12 @@ impl Controller {
                     if core.id == "pcsx2" {
                         let bios = bios::ps2_bios_choice(&paths::system_dir());
                         options.extend(bios.map(|bios| ("pcsx2_bios".to_string(), bios)));
+                        options.extend(accessory.map(|a| {
+                            (
+                                "pcsx2_usb_accessory".to_string(),
+                                a.core_option().to_string(),
+                            )
+                        }));
                     }
                     options
                 })

@@ -9,6 +9,7 @@ pub mod hw_gl;
 pub mod hw_vulkan;
 pub mod input;
 pub mod ipc;
+pub mod mic;
 pub mod perf;
 pub mod resample;
 pub mod sandbox;

@@ -160,6 +160,20 @@ pub struct VideoFrame<'a> {
     pub pitch: usize,
 }
 
+/// Provides the microphones a core opens through `RETRO_ENVIRONMENT_GET_MICROPHONE_INTERFACE`.
+pub trait MicrophoneProvider {
+    /// Opens the next microphone, or returns `None` when there is none to give.
+    fn open(&mut self, rate: u32) -> Option<Box<dyn Microphone>>;
+}
+
+pub trait Microphone {
+    fn sample_rate(&self) -> u32;
+    fn set_active(&mut self, active: bool) -> bool;
+    fn is_active(&self) -> bool;
+    /// Copies the samples captured since the last call. `None` when the microphone is inactive.
+    fn read(&mut self, samples: &mut [i16]) -> Option<usize>;
+}
+
 pub trait Frontend {
     fn video_refresh(&mut self, frame: Option<VideoFrame<'_>>);
     fn video_refresh_hw(&mut self, width: u32, height: u32);
@@ -571,6 +585,13 @@ struct RawProvider(*mut dyn HwContextProvider);
 unsafe impl Send for RawProvider {}
 
 static HW_PROVIDER: std::sync::Mutex<Option<RawProvider>> = std::sync::Mutex::new(None);
+
+// Cores use the microphone interface from the thread that runs them, and the provider's
+// capture stream is not `Send`, so it stays on that thread.
+thread_local! {
+    static MICROPHONE_PROVIDER: RefCell<Option<Box<dyn MicrophoneProvider>>> =
+        const { RefCell::new(None) };
+}
 static HW_CONTEXT_RESET: std::sync::Mutex<Option<unsafe extern "C" fn()>> =
     std::sync::Mutex::new(None);
 static HW_CONTEXT_DESTROY: std::sync::Mutex<Option<unsafe extern "C" fn()>> =
@@ -703,6 +724,15 @@ pub unsafe fn install_hw_provider(p: *mut dyn HwContextProvider) {
 
 pub fn uninstall_hw_provider() {
     *HW_PROVIDER.lock().unwrap() = None;
+}
+
+/// Lets cores on this thread open microphones until `uninstall_microphone_provider`.
+pub fn install_microphone_provider(provider: Box<dyn MicrophoneProvider>) {
+    MICROPHONE_PROVIDER.with(|p| *p.borrow_mut() = Some(provider));
+}
+
+pub fn uninstall_microphone_provider() {
+    MICROPHONE_PROVIDER.with(|p| p.borrow_mut().take());
 }
 
 pub fn take_pending_hw_reset() -> Option<unsafe extern "C" fn()> {
@@ -1131,6 +1161,18 @@ unsafe extern "C" fn env_trampoline(cmd: c_uint, data: *mut c_void) -> bool {
             info.iface = &vfs::INTERFACE;
             true
         }
+        sys::RETRO_ENVIRONMENT_GET_MICROPHONE_INTERFACE => {
+            if data.is_null() {
+                return false;
+            }
+            let iface = unsafe { &mut *(data as *mut sys::retro_microphone_interface) };
+            let installed = MICROPHONE_PROVIDER.with(|p| p.borrow().is_some());
+            if !installed || iface.interface_version > sys::RETRO_MICROPHONE_INTERFACE_VERSION {
+                return false;
+            }
+            *iface = microphone_interface();
+            true
+        }
         sys::RETRO_ENVIRONMENT_SET_ROTATION => {
             if data.is_null() {
                 return false;
@@ -1357,6 +1399,85 @@ unsafe extern "C" fn input_state_trampoline(
         let source = INPUT_SOURCE.read().unwrap().clone();
         source.map_or(0, |s| s(port, device, index, id))
     })
+}
+
+fn with_microphone_provider<R>(f: impl FnOnce(&mut dyn MicrophoneProvider) -> R) -> Option<R> {
+    MICROPHONE_PROVIDER.with(|p| p.borrow_mut().as_mut().map(|p| f(p.as_mut())))
+}
+
+// Each handle is a boxed `Box<dyn Microphone>`, so the pointer the core keeps is thin.
+fn microphone_interface() -> sys::retro_microphone_interface {
+    sys::retro_microphone_interface {
+        interface_version: sys::RETRO_MICROPHONE_INTERFACE_VERSION,
+        open_mic: Some(open_mic_trampoline),
+        close_mic: Some(close_mic_trampoline),
+        get_params: Some(get_mic_params_trampoline),
+        set_mic_state: Some(set_mic_state_trampoline),
+        get_mic_state: Some(get_mic_state_trampoline),
+        read_mic: Some(read_mic_trampoline),
+    }
+}
+
+unsafe extern "C" fn open_mic_trampoline(
+    params: *const sys::retro_microphone_params,
+) -> *mut sys::retro_microphone {
+    let rate = unsafe { params.as_ref() }.map_or(0, |p| p.rate);
+    match with_microphone_provider(|p| p.open(rate)).flatten() {
+        Some(mic) => Box::into_raw(Box::new(mic)).cast(),
+        None => ptr::null_mut(),
+    }
+}
+
+unsafe extern "C" fn close_mic_trampoline(mic: *mut sys::retro_microphone) {
+    if !mic.is_null() {
+        drop(unsafe { Box::from_raw(mic.cast::<Box<dyn Microphone>>()) });
+    }
+}
+
+unsafe extern "C" fn get_mic_params_trampoline(
+    mic: *const sys::retro_microphone,
+    params: *mut sys::retro_microphone_params,
+) -> bool {
+    let (Some(mic), Some(params)) = (
+        unsafe { mic.cast::<Box<dyn Microphone>>().as_ref() },
+        unsafe { params.as_mut() },
+    ) else {
+        return false;
+    };
+    params.rate = mic.sample_rate();
+    true
+}
+
+unsafe extern "C" fn set_mic_state_trampoline(
+    mic: *mut sys::retro_microphone,
+    state: bool,
+) -> bool {
+    match unsafe { mic.cast::<Box<dyn Microphone>>().as_mut() } {
+        Some(mic) => mic.set_active(state),
+        None => false,
+    }
+}
+
+unsafe extern "C" fn get_mic_state_trampoline(mic: *const sys::retro_microphone) -> bool {
+    match unsafe { mic.cast::<Box<dyn Microphone>>().as_ref() } {
+        Some(mic) => mic.is_active(),
+        None => false,
+    }
+}
+
+unsafe extern "C" fn read_mic_trampoline(
+    mic: *mut sys::retro_microphone,
+    samples: *mut i16,
+    num_samples: usize,
+) -> c_int {
+    let Some(mic) = (unsafe { mic.cast::<Box<dyn Microphone>>().as_mut() }) else {
+        return -1;
+    };
+    if samples.is_null() {
+        return -1;
+    }
+    let out = unsafe { std::slice::from_raw_parts_mut(samples, num_samples) };
+    mic.read(out).map_or(-1, |n| n as c_int)
 }
 
 #[cfg(test)]

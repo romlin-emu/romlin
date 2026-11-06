@@ -1,5 +1,6 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod accessories;
 mod achievements;
 mod app;
 mod avatar;
