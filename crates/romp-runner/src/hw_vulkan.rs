@@ -235,12 +235,36 @@ pub fn library_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(name))
 }
 
-/// Whether a Vulkan device can be created here.
-pub fn probe() -> bool {
-    HwVulkanContext::create(&library_path())
-        .and_then(|ctx| ctx.create_own_device().map(|_| ()))
-        .map_err(|e| tracing::info!("no Vulkan: {e}"))
-        .is_ok()
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Probe {
+    Unavailable,
+    NoSurface,
+    Ready,
+}
+
+impl Probe {
+    /// What the app reads back from the probe process.
+    pub fn exit_code(self) -> i32 {
+        match self {
+            Probe::Ready => 0,
+            Probe::Unavailable => 1,
+            Probe::NoSurface => 2,
+        }
+    }
+}
+
+/// Whether a Vulkan device can be created here, and whether cores also get a surface.
+pub fn probe() -> Probe {
+    let ctx = HwVulkanContext::create(&library_path())
+        .and_then(|ctx| ctx.create_own_device().map(|_| ctx));
+    match ctx {
+        Err(e) => {
+            tracing::info!("no Vulkan: {e}");
+            Probe::Unavailable
+        }
+        Ok(ctx) if ctx.surface == vk::SurfaceKHR::null() => Probe::NoSurface,
+        Ok(_) => Probe::Ready,
+    }
 }
 
 impl HwVulkanContext {
@@ -264,9 +288,19 @@ impl HwVulkanContext {
         }
         // Cores such as Dolphin present only through a swapchain on a surface, and there's no window.
         let headless = has(ash::khr::surface::NAME) && has(ash::ext::headless_surface::NAME);
-        if headless {
+        // NVIDIA's Windows driver offers no headless surface, so there a hidden window gives one.
+        let windowed = cfg!(windows)
+            && !headless
+            && has(ash::khr::surface::NAME)
+            && has(ash::khr::win32_surface::NAME);
+        if headless || windowed {
             extensions.push(ash::khr::surface::NAME.as_ptr());
+        }
+        if headless {
             extensions.push(ash::ext::headless_surface::NAME.as_ptr());
+        }
+        if windowed {
+            extensions.push(ash::khr::win32_surface::NAME.as_ptr());
         }
         if has(ash::khr::portability_enumeration::NAME) {
             extensions.push(ash::khr::portability_enumeration::NAME.as_ptr());
@@ -285,9 +319,19 @@ impl HwVulkanContext {
             let loader = ash::ext::headless_surface::Instance::new(&entry, &instance);
             let info = vk::HeadlessSurfaceCreateInfoEXT::default();
             unsafe { loader.create_headless_surface(&info, None) }.unwrap_or_default()
+        } else if windowed {
+            hidden_window_surface(&entry, &instance).unwrap_or_else(|e| {
+                tracing::warn!("no Vulkan surface from a hidden window: {e}");
+                vk::SurfaceKHR::null()
+            })
         } else {
             vk::SurfaceKHR::null()
         };
+        if surface == vk::SurfaceKHR::null() {
+            tracing::warn!(
+                "no Vulkan surface: cores that present through one, such as Dolphin, show no picture"
+            );
+        }
         Ok(Self {
             _entry: entry,
             instance,
@@ -648,6 +692,57 @@ impl HwVulkanContext {
             set_signal_semaphore,
         }
     }
+}
+
+/// The window is never shown or drawn to: cores only ask the surface about formats and sizes.
+/// It lasts as long as the thread that made it, which is the one driving the core.
+#[cfg(windows)]
+fn hidden_window_surface(
+    entry: &ash::Entry,
+    instance: &ash::Instance,
+) -> anyhow::Result<vk::SurfaceKHR> {
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::{CreateWindowExW, DestroyWindow};
+    let class: Vec<u16> = "STATIC\0".encode_utf16().collect();
+    let window = unsafe {
+        CreateWindowExW(
+            0,
+            class.as_ptr(),
+            std::ptr::null(),
+            0,
+            0,
+            0,
+            1,
+            1,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null(),
+        )
+    };
+    if window.is_null() {
+        anyhow::bail!(
+            "CreateWindowExW failed: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    let module = unsafe { GetModuleHandleW(std::ptr::null()) };
+    let info = vk::Win32SurfaceCreateInfoKHR::default()
+        .hinstance(module as vk::HINSTANCE)
+        .hwnd(window as vk::HWND);
+    let loader = ash::khr::win32_surface::Instance::new(entry, instance);
+    unsafe { loader.create_win32_surface(&info, None) }.map_err(|e| {
+        unsafe { DestroyWindow(window) };
+        anyhow::anyhow!("vkCreateWin32SurfaceKHR: {e}")
+    })
+}
+
+#[cfg(not(windows))]
+fn hidden_window_surface(
+    _entry: &ash::Entry,
+    _instance: &ash::Instance,
+) -> anyhow::Result<vk::SurfaceKHR> {
+    anyhow::bail!("hidden window surfaces are Windows only")
 }
 
 fn bytes_per_pixel(format: vk::Format) -> Option<u64> {
@@ -1234,7 +1329,7 @@ mod tests {
         };
         assert!(unsafe { ctx.set_negotiation_interface(&raw const negotiation as *const c_void) });
         assert!(ctx.create_device().is_err());
-        if cfg!(target_os = "macos") {
+        if cfg!(any(target_os = "macos", windows)) {
             // Dolphin presents only through a swapchain on this surface.
             assert_ne!(SURFACE.load(Ordering::SeqCst), 0);
         }

@@ -92,7 +92,7 @@ fn main() -> anyhow::Result<()> {
         )
         .init();
     if std::env::args().nth(1).as_deref() == Some("--probe-vulkan") {
-        std::process::exit(if hw_vulkan::probe() { 0 } else { 1 });
+        std::process::exit(hw_vulkan::probe().exit_code());
     }
     // A core's fault filter passes on the faults it doesn't claim, to whatever came before it.
     #[cfg(target_os = "linux")]
