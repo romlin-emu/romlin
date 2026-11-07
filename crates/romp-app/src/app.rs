@@ -15,7 +15,7 @@ mod updates;
 
 use crate::cores::Cores;
 use crate::covers::Covers;
-use crate::credentials::{Keychain, TokenStore};
+use crate::credentials::{Keychain, SignIns, TokenStore};
 use crate::grid::{row_count, row_range, CoverSlots, RecentRows, RECENT_ROWS};
 use crate::restore::{LastView, Observed, Placement, VIEW_KEY, WINDOW_KEY};
 use crate::romm::client::{check_version, server_candidates, Client, Error};
@@ -56,6 +56,7 @@ struct Shared {
     rt: Runtime,
     store: Arc<Mutex<Store>>,
     tokens: Arc<dyn TokenStore>,
+    ra_tokens: Arc<dyn TokenStore>,
     covers: Arc<Covers>,
     downloads: Arc<Semaphore>,
     cores: Arc<Cores>,
@@ -181,10 +182,12 @@ fn open_store() -> rusqlite::Result<Store> {
 pub fn run(game_mode: bool) -> anyhow::Result<()> {
     crate::credentials::prepare(game_mode);
     crate::vulkan::start_probe();
+    let sign_ins = SignIns::new(Keychain);
     let shared = Shared {
         rt: Runtime::new()?,
         store: Arc::new(Mutex::new(open_store()?)),
-        tokens: Arc::new(Keychain::app()),
+        tokens: sign_ins.romm(),
+        ra_tokens: sign_ins.retro_achievements(),
         covers: Arc::new(Covers::new(paths::covers_dir())),
         downloads: Arc::new(Semaphore::new(PARALLEL_DOWNLOADS)),
         cores: Arc::new(Cores::new(paths::cores_dir())),
