@@ -3,9 +3,15 @@ use crate::input::{Command, Controls};
 use anyhow::{ensure, Context};
 use romlin_proto::msg::AppMsg;
 
-fn wait_for(pads: &mut Gamepads, condition: impl Fn(&Gamepads) -> bool) -> anyhow::Result<()> {
+/// Polls until `condition` holds. `pump` stands in for the polling thread when the test owns SDL.
+fn wait_with(
+    pads: &mut Gamepads,
+    mut pump: impl FnMut(),
+    condition: impl Fn(&Gamepads) -> bool,
+) -> anyhow::Result<()> {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
+        pump();
         pads.poll();
         if condition(pads) {
             return Ok(());
@@ -13,6 +19,11 @@ fn wait_for(pads: &mut Gamepads, condition: impl Fn(&Gamepads) -> bool) -> anyho
         ensure!(Instant::now() < deadline, "timed out waiting for SDL input");
         std::thread::sleep(Duration::from_millis(10));
     }
+}
+
+#[cfg(all(windows, target_arch = "x86_64", feature = "controller-hidmaestro"))]
+fn wait_for(pads: &mut Gamepads, condition: impl Fn(&Gamepads) -> bool) -> anyhow::Result<()> {
+    wait_with(pads, || {}, condition)
 }
 
 fn state(pads: &Gamepads, key: &str, mappings: &Mappings) -> PadInput {
@@ -27,9 +38,23 @@ fn sdl_virtual_controller_reaches_game_input() -> anyhow::Result<()> {
     use sdl3::joystick::{JoystickType, VirtualJoystickDescription};
 
     let _serial = SDL_TEST_LOCK.lock().unwrap();
-    let mut pads = Gamepads::new();
-    let sdl = pads.sdl.as_ref().context("SDL initialization failed")?;
-    let joysticks = sdl._context.joystick()?;
+    // This test owns SDL, which is process-wide, so it does the polling thread's work itself.
+    let mut sdl = Sdl::new().context("SDL initialization failed")?;
+    let mut pads = Gamepads {
+        pads: Vec::new(),
+        buzz: None,
+        shared: Arc::default(),
+        poller: None,
+        active: HashMap::new(),
+        presses: Vec::new(),
+    };
+    let shared = pads.shared.clone();
+    let joysticks = sdl.joysticks.clone();
+    let mut pump = || {
+        let mut presses = Vec::new();
+        sdl.step(&mut presses);
+        sdl.publish(&shared, &mut presses);
+    };
     let connection = joysticks.attach_virtual_joystick(
         VirtualJoystickDescription::new()
             .name("Romlin controller test")
@@ -48,20 +73,20 @@ fn sdl_virtual_controller_reaches_game_input() -> anyhow::Result<()> {
     // SDL virtual triggers use the full signed range, with -32768 released.
     joystick.set_virtual_axis(Axis::TriggerLeft as u32, i16::MIN)?;
     joystick.set_virtual_axis(Axis::TriggerRight as u32, i16::MIN)?;
-    wait_for(&mut pads, |p| {
-        p.pads().iter().any(|p| p.id == connection.id())
+    wait_with(&mut pads, &mut pump, |p| {
+        p.pads().iter().any(|p| p.id == u32::from(connection.id()))
     })?;
     let key = pads.keys()[pads
         .pads()
         .iter()
-        .position(|p| p.id == connection.id())
+        .position(|p| p.id == u32::from(connection.id()))
         .unwrap()]
     .clone();
     let mappings = Mappings::default();
     assert_eq!(state(&pads, &key, &mappings).state, PadState::default());
 
     joystick.set_virtual_axis(Axis::TriggerLeft as u32, 0)?;
-    wait_for(&mut pads, |p| {
+    wait_with(&mut pads, &mut pump, |p| {
         state(p, &key, &mappings).state.axes[4] > 16000
     })?;
     assert_eq!(state(&pads, &key, &mappings).state.buttons, 0);
@@ -71,7 +96,7 @@ fn sdl_virtual_controller_reaches_game_input() -> anyhow::Result<()> {
     joystick.set_virtual_axis(Axis::LeftX as u32, 24000)?;
     joystick.set_virtual_axis(Axis::RightY as u32, -24000)?;
     joystick.set_virtual_axis(Axis::TriggerLeft as u32, i16::MAX)?;
-    wait_for(&mut pads, |p| {
+    wait_with(&mut pads, &mut pump, |p| {
         state(p, &key, &mappings).state.buttons == (1 << input::B | 1 << input::L2)
     })?;
     let pressed = state(&pads, &key, &mappings);
@@ -109,7 +134,7 @@ fn sdl_virtual_controller_reaches_game_input() -> anyhow::Result<()> {
     joystick.set_virtual_axis(Axis::LeftX as u32, 1000)?;
     joystick.set_virtual_axis(Axis::RightY as u32, 0)?;
     joystick.set_virtual_axis(Axis::TriggerLeft as u32, i16::MIN)?;
-    wait_for(&mut pads, |p| {
+    wait_with(&mut pads, &mut pump, |p| {
         state(p, &key, &mappings).state == PadState::default()
     })?;
     assert_eq!(
@@ -122,13 +147,15 @@ fn sdl_virtual_controller_reaches_game_input() -> anyhow::Result<()> {
 
     // Unplug while held must also release the runner's input.
     joystick.set_virtual_button(SdlButton::South as u32, true)?;
-    wait_for(&mut pads, |p| {
+    wait_with(&mut pads, &mut pump, |p| {
         state(p, &key, &mappings).state.buttons == 1 << input::B
     })?;
     controls.set_gamepads(vec![(Some(1), state(&pads, &key, &mappings).state)]);
     drop(joystick);
     drop(connection);
-    wait_for(&mut pads, |p| !p.connected().iter().any(|p| p.key == key))?;
+    wait_with(&mut pads, &mut pump, |p| {
+        !p.connected().iter().any(|p| p.key == key)
+    })?;
     assert_eq!(
         controls.set_gamepads(vec![]),
         [Command::Send(AppMsg::Pad {
@@ -159,7 +186,7 @@ fn hidmaestro_controller_reaches_sdl() -> anyhow::Result<()> {
     );
     hm.load_default_profiles()?;
     let mut pads = Gamepads::new();
-    ensure!(pads.sdl.is_some(), "SDL initialization failed");
+    ensure!(pads.poller.is_some(), "SDL initialization failed");
     let before = pads.keys();
     let controller = hm.create_controller("xbox-360-wired", None)?;
     let result = (|| -> anyhow::Result<()> {
