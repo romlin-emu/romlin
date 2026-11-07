@@ -5,7 +5,7 @@ use super::{
 use crate::gamepads::Button;
 use crate::gettext_noop;
 use crate::i18n::translate;
-use crate::input::{A, B, DOWN, L, LEFT, R, RIGHT, START, UP, X};
+use crate::input::{A, B, DOWN, L, LEFT, R, RIGHT, START, UP, X, Y};
 use crate::mapping::BUTTONS;
 use crate::navigation::{move_in_grid, Dir};
 use crate::pad_labels::{badge, Badge, Family};
@@ -128,6 +128,7 @@ impl Controller {
             (SCREEN_LIBRARY, L) => self.step_sidebar(-1),
             (SCREEN_LIBRARY, R) => self.step_sidebar(1),
             (SCREEN_LIBRARY, START) => self.open_settings(),
+            (SCREEN_LIBRARY, Y) => self.surprise(),
             (SCREEN_GAME | SCREEN_SETTINGS, UP | DOWN | LEFT | RIGHT | A) => {
                 navigate_controls(ui.window(), button);
             }
@@ -281,6 +282,7 @@ fn hints(screen: i32, family: Family) -> Vec<Hint> {
             ),
             (vec![key(family.confirm())], gettext_noop!("Open")),
             (shoulders, gettext_noop!("Change list")),
+            (vec![key(Button::West)], gettext_noop!("Surprise me")),
             (vec![key(Button::Start)], gettext_noop!("Settings")),
         ],
         SCREEN_GAME => vec![
@@ -605,6 +607,7 @@ mod tests {
             library[2],
             (vec![Badge::Text("LB"), Badge::Text("RB")], "Change list")
         );
+        assert_eq!(library[3], (vec![Badge::Text("X")], "Surprise me"));
         let game = hints(SCREEN_GAME, Family::Ps5);
         assert_eq!(game[1], (vec![Badge::Shape(Shape::Cross)], "Select"));
         assert_eq!(game[4], (vec![Badge::Shape(Shape::Circle)], "Back"));
