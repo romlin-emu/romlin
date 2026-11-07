@@ -43,11 +43,27 @@ jobs:
     permissions:
       contents: write
     steps:
+      # Full history and tags let cocogitto diff the newest reachable release tag.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: romlin-*
           path: dist
           merge-multiple: true
+      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
+        with:
+          tool: cocogitto
+      - name: Generate the changelog
+        run: |
+          base=$(git tag --merged HEAD --list 'v*' --sort=-version:refname | head -n 1)
+          if [ -n "$base" ]; then
+            cog changelog "$base.." > changelog.md
+          else
+            cog changelog > changelog.md
+          fi
       - name: Replace the nightly release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -58,9 +74,14 @@ jobs:
             echo "Skipping a nightly superseded by main at $main_sha"
             exit 0
           fi
+          {
+            echo "Latest build of main, from ${GITHUB_SHA::7}. Not signed or notarized: the first time, on macOS right-click Romlin and choose Open, and on Windows choose More info, then Run anyway."
+            echo
+            cat changelog.md
+          } > notes.md
           gh release delete nightly --yes --cleanup-tag || true
           gh release create nightly dist/* \
             --prerelease \
             --target "$GITHUB_SHA" \
             --title "Nightly" \
-            --notes "Latest build of main, from ${GITHUB_SHA::7}. Not signed or notarized: the first time, on macOS right-click Romlin and choose Open, and on Windows choose More info, then Run anyway."
+            --notes-file notes.md

@@ -1,0 +1,2 @@
+# Merge commits carry no conventional type; their branch commits appear individually.
+ignore_merge_commits = true

@@ -56,8 +56,10 @@ retains at most one pending publication; nightly is a rolling channel, so supers
 pending publications can still be coalesced. Publication requires the main branch
 and rechecks its current commit before replacement, so an older build finishing
 late cannot replace a newer nightly. Manual runs on other branches only validate
-and build. Delete/create is still non-atomic if the service fails or a person
-cancels publication.
+and build. Release notes contain the cocogitto changelog since the newest `v*`
+tag reachable from the built commit; `cog.toml` skips merge commits, whose branch
+commits already appear individually. Delete/create is still non-atomic if the
+service fails or a person cancels publication.
 
 ## Local checks
 
