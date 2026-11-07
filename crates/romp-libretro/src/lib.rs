@@ -182,6 +182,7 @@ pub trait Frontend {
     fn input_state(&mut self, port: u32, device: u32, index: u32, id: u32) -> i16;
     fn set_pixel_format(&mut self, fmt: PixelFormat) -> bool;
     fn set_geometry(&mut self, _geometry: Geometry) {}
+    fn set_timing(&mut self, _timing: Timing) {}
     fn shutdown(&mut self);
 }
 
@@ -1073,7 +1074,13 @@ unsafe extern "C" fn env_trampoline(cmd: c_uint, data: *mut c_void) -> bool {
                 return false;
             }
             let info = unsafe { &*(data as *const sys::retro_system_av_info) };
-            with_frontend(|f| f.set_geometry(Geometry::from(&info.geometry)));
+            with_frontend(|f| {
+                f.set_geometry(Geometry::from(&info.geometry));
+                f.set_timing(Timing {
+                    fps: info.timing.fps,
+                    sample_rate: info.timing.sample_rate,
+                });
+            });
             true
         }
         sys::RETRO_ENVIRONMENT_SET_PIXEL_FORMAT => {
@@ -1580,6 +1587,7 @@ mod tests {
     #[derive(Default)]
     struct Recorder {
         geometry: Option<Geometry>,
+        timing: Option<Timing>,
         hw_frame: Option<(u32, u32)>,
     }
 
@@ -1601,6 +1609,9 @@ mod tests {
         fn shutdown(&mut self) {}
         fn set_geometry(&mut self, geometry: Geometry) {
             self.geometry = Some(geometry);
+        }
+        fn set_timing(&mut self, timing: Timing) {
+            self.timing = Some(timing);
         }
     }
 
@@ -1698,11 +1709,14 @@ mod tests {
     }
 
     #[test]
-    fn set_system_av_info_forwards_its_geometry() {
+    fn set_system_av_info_forwards_its_geometry_and_timing() {
         let mut recorder = Recorder::default();
         let mut raw = sys::retro_system_av_info {
             geometry: raw_geometry(4.0 / 3.0),
-            ..Default::default()
+            timing: sys::retro_system_timing {
+                fps: 50.0,
+                sample_rate: 48000.0,
+            },
         };
         let handled = {
             let _g = FrontendGuard::install(&mut recorder);
@@ -1715,6 +1729,8 @@ mod tests {
         };
         assert!(handled);
         assert_eq!(recorder.geometry.unwrap().aspect_ratio, 4.0 / 3.0);
+        let timing = recorder.timing.expect("timing forwarded");
+        assert_eq!((timing.fps, timing.sample_rate), (50.0, 48000.0));
     }
 
     static TRAY: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());

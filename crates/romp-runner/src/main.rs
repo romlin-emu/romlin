@@ -245,10 +245,10 @@ fn run(args: &Args, frontend: &mut Frontend, link: &Link) -> anyhow::Result<()> 
     }
 
     let av = core.av_info(frontend);
-    let sample_rate = av.timing.sample_rate.round() as u32;
+    let mut sample_rate = av.timing.sample_rate.round() as u32;
     let buffer_ms: usize = if cfg!(target_os = "macos") { 250 } else { 500 };
     // Without a sound device the game still plays, silently, at the same pace.
-    let _audio = match audio::open(sample_rate, buffer_ms) {
+    let audio_output = match audio::open(sample_rate, buffer_ms) {
         Ok((output, producer)) => {
             let mut pipe = frontend.audio.lock();
             pipe.set_producer(producer);
@@ -279,7 +279,7 @@ fn run(args: &Args, frontend: &mut Frontend, link: &Link) -> anyhow::Result<()> 
     send_discs(link, &mut core, frontend);
 
     frontend.aspect = av.geometry.aspect_ratio;
-    let frame_duration = Duration::from_secs_f64(1.0 / av.timing.fps.max(1.0));
+    let mut frame_duration = Duration::from_secs_f64(1.0 / av.timing.fps.max(1.0));
     let mut next_frame_at = Instant::now();
     let mut paused = false;
     let mut stop_requested = false;
@@ -385,6 +385,17 @@ fn run(args: &Args, frontend: &mut Frontend, link: &Link) -> anyhow::Result<()> 
             let run_started = Instant::now();
             core.run(frontend);
             times.core = run_started.elapsed();
+            if let Some(timing) = frontend.timing.take() {
+                frame_duration = Duration::from_secs_f64(1.0 / timing.fps.max(1.0));
+                next_frame_at = Instant::now();
+                let new_rate = timing.sample_rate.round() as u32;
+                if new_rate > 0 && new_rate != sample_rate {
+                    if let Some(output) = &audio_output {
+                        frontend.audio.lock().set_rates(new_rate, output.rate);
+                    }
+                    sample_rate = new_rate;
+                }
+            }
             let resume_started = Instant::now();
             if let Some((slot, give_up)) = resume {
                 match saves.try_load_state(slot, &mut core, frontend) {

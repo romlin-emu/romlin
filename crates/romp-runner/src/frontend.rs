@@ -14,6 +14,8 @@ pub struct Frontend {
     pub video_dirty: bool,
     pub video_format: lr::PixelFormat,
     pub aspect: f32,
+    /// Timing the core announced since the runner last looked.
+    pub timing: Option<lr::Timing>,
     pub audio: SharedAudio,
     pub input: InputState,
     pub shutdown: bool,
@@ -29,6 +31,7 @@ impl Frontend {
             video_dirty: false,
             video_format: lr::PixelFormat::Xrgb8888,
             aspect: 0.0,
+            timing: None,
             audio: SharedAudio::default(),
             input: InputState::default(),
             shutdown: false,
@@ -92,6 +95,10 @@ impl lr::Frontend for Frontend {
 
     fn set_geometry(&mut self, geometry: lr::Geometry) {
         self.aspect = geometry.aspect_ratio;
+    }
+
+    fn set_timing(&mut self, timing: lr::Timing) {
+        self.timing = Some(timing);
     }
 }
 
