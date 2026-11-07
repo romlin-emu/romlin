@@ -7,7 +7,7 @@ use sdl3::event::Event;
 use sdl3::gamepad::{Axis, Button as SdlButton, GamepadType};
 use sdl3::joystick::{Joystick, JoystickId};
 use sdl3::{EventPump, GamepadSubsystem, JoystickSubsystem};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -243,7 +243,12 @@ struct Shared {
     pads: Vec<Pad>,
     buzz: Option<[u8; 4]>,
     presses: Vec<(u32, Button)>,
+    /// Each controller's strong and weak motor, and for how long, for the polling thread to set.
+    rumble: Option<(Vec<Motors>, Duration)>,
 }
+
+/// A controller's id with its strong and weak motor.
+type Motors = (u32, u16, u16);
 
 /// How long the polling thread waits for SDL between copies, at most.
 const POLL_EVERY: Duration = Duration::from_millis(4);
@@ -263,6 +268,9 @@ struct Sdl {
     events: EventPump,
     open: Vec<(sdl3::gamepad::Gamepad, Pad, [bool; 2])>,
     receivers: Vec<Receiver>,
+    /// Controllers that refused to rumble, and those that rumbled, so the log says so once.
+    refused: HashSet<u32>,
+    rumbled: HashSet<u32>,
 }
 
 impl Sdl {
@@ -281,6 +289,8 @@ impl Sdl {
             events,
             open: Vec::new(),
             receivers: Vec::new(),
+            refused: HashSet::new(),
+            rumbled: HashSet::new(),
         };
         for id in sdl.subsystem.gamepads()? {
             sdl.open(id);
@@ -350,7 +360,9 @@ impl Sdl {
         );
         let name = gamepad.name().unwrap_or_else(|| "Controller".into());
         let family = family(gamepad.r#type());
-        tracing::info!("controller connected: {name}");
+        // SAFETY: the gamepad is open, which is all SDL asks of a properties query.
+        let rumble = unsafe { gamepad.has_rumble() };
+        tracing::info!(rumble, "controller connected: {name}");
         let pad = Pad {
             id: raw,
             identity: SdlIdentity {
@@ -367,6 +379,28 @@ impl Sdl {
         };
         self.open.push((gamepad, pad, [false; 2]));
         self.open.sort_by_key(|(_, p, _)| p.id);
+    }
+
+    fn rumble(&mut self, motors: &[Motors], duration: Duration) {
+        let ms = duration.as_millis().try_into().unwrap_or(u32::MAX);
+        for (gamepad, pad, _) in &mut self.open {
+            let Some(&(_, strong, weak)) = motors.iter().find(|(id, _, _)| *id == pad.id) else {
+                continue;
+            };
+            match gamepad.set_rumble(strong, weak, ms) {
+                Err(e) => {
+                    if self.refused.insert(pad.id) {
+                        tracing::info!("{} can't rumble: {e}", pad.name);
+                    }
+                }
+                Ok(()) if strong > 0 || weak > 0 => {
+                    if self.rumbled.insert(pad.id) {
+                        tracing::info!(strong, weak, "rumbling {}", pad.name);
+                    }
+                }
+                Ok(()) => {}
+            }
+        }
     }
 
     /// Waits a moment for SDL, then copies every controller and the presses since last time.
@@ -440,6 +474,10 @@ impl Poller {
                     let mut presses = Vec::new();
                     while !stop.load(Ordering::Relaxed) {
                         sdl.step(&mut presses);
+                        let rumble = shared.lock().unwrap().rumble.take();
+                        if let Some((motors, duration)) = rumble {
+                            sdl.rumble(&motors, duration);
+                        }
                         sdl.publish(&shared, &mut presses);
                     }
                 })
@@ -581,6 +619,20 @@ impl Gamepads {
                 }
             })
             .collect()
+    }
+
+    /// Rumbles each controller's strong and weak motor with what `motors` gives for its key.
+    pub fn rumble(&mut self, motors: impl Fn(&str) -> (u16, u16), duration: Duration) {
+        let rumble = self
+            .keys()
+            .iter()
+            .zip(self.pads())
+            .map(|(key, pad)| {
+                let (strong, weak) = motors(key);
+                (pad.id, strong, weak)
+            })
+            .collect();
+        self.shared.lock().unwrap().rumble = Some((rumble, duration));
     }
 
     /// The family of the controller used last, for naming its buttons.
