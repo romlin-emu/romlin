@@ -387,6 +387,7 @@ impl Controller {
                 && !self.preparing.get(),
         );
         self.refresh_collection_controls(detail.id);
+        self.refresh_status_controls(detail.id);
         ui.set_game_can_download(!self.offline.get() && self.downloading_id().is_none());
         if !playable {
             ui.set_game_status(tr!("Romlin can't play {} games yet.", detail.platform).into());
