@@ -463,15 +463,18 @@ impl Controller {
         let show = self.has_scope("collections.read");
         ui.set_show_collections(show);
         ui.set_can_edit_collections(self.can_edit_collections());
-        let (collections, member_of) = {
+        let (collections, member_of, favorite) = {
             let store = self.shared.store.lock().unwrap();
-            (store.collections(false), store.memberships(rom_id))
+            let favorite = store
+                .favorites()
+                .is_some_and(|f| !store.group_members_in(&f.key, rom_id).is_empty());
+            (
+                store.collections(false),
+                store.memberships(rom_id),
+                favorite,
+            )
         };
-        ui.set_game_favorite(
-            collections
-                .iter()
-                .any(|c| c.kind == CollectionKind::Favorites && member_of.contains(&c.key)),
-        );
+        ui.set_game_favorite(favorite);
         let memberships: Vec<Membership> = collections
             .iter()
             .filter(|c| c.kind == CollectionKind::Mine)
@@ -510,14 +513,20 @@ impl Controller {
         let favorites = self.shared.store.lock().unwrap().favorites();
         match favorites {
             Some(favorites) => {
-                let member = !self
+                // The heart shows when any version is a favourite, so clearing it clears them all.
+                let favorited = self
                     .shared
                     .store
                     .lock()
                     .unwrap()
-                    .memberships(rom_id)
-                    .contains(&favorites.key);
-                self.set_membership(favorites, rom_id, member);
+                    .group_members_in(&favorites.key, rom_id);
+                if favorited.is_empty() {
+                    self.set_membership(favorites, rom_id, true);
+                } else {
+                    for id in favorited {
+                        self.set_membership(favorites.clone(), id, false);
+                    }
+                }
             }
             None => self.create_collection("Favorites".into(), true, Some(rom_id)),
         }

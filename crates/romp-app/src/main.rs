@@ -58,6 +58,7 @@ mod store;
 mod sync;
 mod textures;
 mod updates;
+mod versions;
 mod vulkan;
 mod xemu;
 

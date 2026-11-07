@@ -16,7 +16,8 @@ use crate::saves::{self, SramOutcome};
 use crate::store::GameDetail;
 use crate::xemu::{self, Xemu};
 use crate::{GameCard, Shot};
-use slint::{Image, Model, ModelRc, VecModel};
+use slint::{Image, Model, ModelRc, SharedString, VecModel};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -29,6 +30,7 @@ pub(super) struct GameState {
     detail: GameDetail,
     pub(super) shots: Rc<VecModel<Shot>>,
     similar: Rc<VecModel<GameCard>>,
+    versions: Vec<i64>,
 }
 
 fn load_image(path: &Path) -> Option<Image> {
@@ -127,6 +129,7 @@ impl Controller {
             detail: detail.clone(),
             shots: shots.clone(),
             similar: similar.clone(),
+            versions: Vec::new(),
         });
         self.refresh_game_page(true);
         if let Some(ui) = self.ui() {
@@ -216,7 +219,13 @@ impl Controller {
     fn show_similar(&self, id: i64, ids: Vec<i64>) {
         let games: Vec<GameDetail> = {
             let store = self.shared.store.lock().unwrap();
-            ids.iter().filter_map(|&i| store.game(i)).collect()
+            let own = store.group_pick(id).unwrap_or(id);
+            let mut seen = HashSet::new();
+            ids.iter()
+                .filter_map(|&i| store.group_pick(i))
+                .filter(|&pick| pick != own && seen.insert(pick))
+                .filter_map(|pick| store.game(pick))
+                .collect()
         };
         let mut wanted = Vec::new();
         let cards: Vec<GameCard> = games
@@ -239,6 +248,7 @@ impl Controller {
                     downloaded: g.local_path.is_some(),
                     focused: false,
                     favorite: false,
+                    versions: 1,
                     aspect: details::box_aspect(&g.platform_slug),
                 }
             })
@@ -388,6 +398,7 @@ impl Controller {
         );
         self.refresh_collection_controls(detail.id);
         self.refresh_status_controls(detail.id);
+        self.refresh_version_controls(detail.id);
         ui.set_game_can_download(!self.offline.get() && self.downloading_id().is_none());
         if !playable {
             ui.set_game_status(tr!("Romlin can't play {} games yet.", detail.platform).into());
@@ -1184,6 +1195,78 @@ impl Controller {
                     .to_string(),
             );
         }
+    }
+
+    fn refresh_version_controls(&self, id: i64) {
+        let versions = self.shared.store.lock().unwrap().versions(id);
+        let index = versions.iter().position(|v| v.id == id).unwrap_or(0);
+        if let Some(ui) = self.ui() {
+            let labels: Vec<SharedString> =
+                versions.iter().map(|v| v.label.as_str().into()).collect();
+            ui.set_game_versions(ModelRc::new(VecModel::from(labels)));
+            ui.set_game_version_index(index as i32);
+        }
+        if let Some(state) = self.game.borrow_mut().as_mut() {
+            state.versions = versions.into_iter().map(|v| v.id).collect();
+        }
+    }
+
+    pub(super) fn choose_version(&self, index: usize) {
+        let Some(id) = self
+            .game
+            .borrow()
+            .as_ref()
+            .and_then(|g| g.versions.get(index).copied())
+        else {
+            return;
+        };
+        if self.current_game_id() == Some(id) {
+            return;
+        }
+        let client = self.client.borrow().clone();
+        let Some(client) = client.filter(|_| self.can_edit_status()) else {
+            self.open_game(id);
+            if self.offline.get() {
+                self.game_status(
+                    id,
+                    tr!("You're offline, so this version doesn't become your main one."),
+                );
+            }
+            return;
+        };
+        let prev = {
+            let mut store = self.shared.store.lock().unwrap();
+            let prev = store.group_pick(id);
+            store.set_picked(id);
+            prev
+        };
+        self.reload_games();
+        self.open_game(id);
+        self.shared.rt.spawn(async move {
+            let result = client.set_main_version(id).await;
+            // RomM clears the old main version's siblings too, which can change what other cards
+            // show, so take its picks again rather than guessing.
+            let picks = match result {
+                Ok(()) => client.picked_rom_ids().await.ok(),
+                Err(_) => None,
+            };
+            on_ui(move |c| {
+                if let Some(picks) = picks.filter(|p| !p.is_empty()) {
+                    c.shared.store.lock().unwrap().set_picks(&picks);
+                    c.reload_games();
+                }
+                if let Err(e) = result {
+                    if let Some(prev) = prev {
+                        c.shared.store.lock().unwrap().undo_pick(id, prev);
+                    }
+                    c.reload_games();
+                    if let Some(current) = c.current_game_id() {
+                        c.refresh_version_controls(current);
+                    }
+                    c.game_status(id, tr!("Couldn't make this your main version: {e}.", e));
+                }
+            });
+        });
     }
 
     pub(super) fn game_status(&self, id: i64, text: String) {

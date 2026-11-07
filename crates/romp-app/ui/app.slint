@@ -2,7 +2,7 @@ import { ListView, Locale, Row, ScrollView, Theme } from "theme.slint";
 import { Button, CheckBox, ComboBox, FocusRing, KeyActivator, LineEdit, Slider, Switch } from "focus.slint";
 import { AchievementItem, AchievementRow } from "achievements.slint";
 import { SlotCard, SlotPicture } from "slots.slint";
-import { ProgressIndicator, Spinner } from "std-widgets.slint";
+import { Palette, ProgressIndicator, Spinner } from "std-widgets.slint";
 
 export struct SidebarEntry { header: bool, key: string, name: string, initial: string, count: int, icon: image, has-icon: bool, glyph: string, expanded: bool, can-add: bool, editable: bool, note: bool }
 export struct NotificationRow { id: int, title: string, body: string, level: string, when: string, unread: bool }
@@ -19,7 +19,7 @@ export struct KeyHint { keys: string, action: string }
 export struct PadKey { text: string, shape: string }
 export struct PadHint { keys: [PadKey], action: string }
 export struct RemapRow { name: string, binding: string, waiting: bool }
-export struct GameCard { id: int, title: string, platform: string, cover: image, has-cover: bool, downloaded: bool, focused: bool, favorite: bool, aspect: float }
+export struct GameCard { id: int, title: string, platform: string, cover: image, has-cover: bool, downloaded: bool, focused: bool, favorite: bool, versions: int, aspect: float }
 export struct GameRow { cards: [GameCard], shelf: float }
 export struct Fact { label: string, value: string }
 export struct Shot { image: image, loaded: bool }
@@ -412,6 +412,32 @@ component Avatar inherits Rectangle {
     }
 }
 
+component VersionRow inherits Rectangle {
+    in property <string> text;
+    in property <bool> current;
+    callback clicked();
+    min-height: 32px;
+    border-radius: Theme.radius;
+    background: touch.pressed ? Theme.pressed : root.current ? Theme.accent-soft : touch.has-hover ? Theme.hover : transparent;
+    animate background { duration: 100ms; }
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { root.clicked(); }
+    touch := TouchArea { clicked => { root.clicked(); } }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        Text {
+            horizontal-alignment: Locale.start;
+            vertical-alignment: center;
+            text: root.text;
+            overflow: elide;
+            font-weight: root.current ? 600 : 400;
+            color: Theme.text-strong;
+        }
+    }
+}
+
 component SidebarItem inherits Rectangle {
     in property <bool> focus-enabled: true;
     in property <string> label;
@@ -587,6 +613,17 @@ component Card inherits Rectangle {
                     border-radius: 11px;
                     background: Theme.success;
                     Text { horizontal-alignment: Locale.start; text: "✓"; color: Theme.text-strong; font-weight: 700; }
+                }
+                if root.game.versions > 1: Rectangle {
+                    x: Locale.rtl ? 8px : parent.width - self.width - 8px;
+                    y: parent.height - self.height - 8px;
+                    width: versions-text.preferred-width + 12px;
+                    height: 20px;
+                    border-radius: 10px;
+                    background: Theme.scrim;
+                    accessible-role: text;
+                    accessible-label: @tr("{n} version" | "{n} versions" % root.game.versions);
+                    versions-text := Text { horizontal-alignment: center; text: @tr("{n} version" | "{n} versions" % root.game.versions); color: Theme.text-strong; font-size: Theme.font-caption; font-weight: 600; }
                 }
                 if touch.has-hover: Rectangle { background: Theme.hover; }
                 if root.game.focused || keys.has-focus: FocusRing {
@@ -1465,6 +1502,9 @@ component GamePage inherits FocusScope {
     in property <string> status-label;
     in property <[StatusOption]> status-options;
     callback toggle-status(int, bool);
+    in property <[string]> versions;
+    in property <int> version-index;
+    callback choose-version(int);
 
     in-out property <length> scroll-y <=> page.content-y;
     changed scroll-y => {
@@ -1677,6 +1717,72 @@ component GamePage inherits FocusScope {
                                                     text: option.label;
                                                     checked: option.checked;
                                                     toggled => { root.toggle-status(i, self.checked); }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if root.versions.length > 1: Rectangle {
+                                width: version-label.preferred-width;
+                                Button {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    accessible-role: button;
+                                    accessible-label: root.versions[root.version-index];
+                                    clicked => { version-popup.show(); }
+                                }
+                                version-label := HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 12px;
+                                    spacing: 8px;
+                                    Text {
+                                        vertical-alignment: center;
+                                        text: root.versions[root.version-index];
+                                        color: Palette.control-foreground;
+                                        accessible-role: none;
+                                    }
+                                    Path {
+                                        y: (parent.height - self.height) / 2;
+                                        width: 8px;
+                                        height: 5px;
+                                        commands: "M 0 0 L 8 0 L 4 5 Z";
+                                        fill: Palette.control-foreground;
+                                    }
+                                }
+                                version-popup := PopupWindow {
+                                    y: parent.height + 4px;
+                                    width: clamp(version-list.preferred-width, 260px, 420px);
+                                    // Some games have dozens of versions, so the menu scrolls rather than run off the window.
+                                    height: min(version-list.preferred-height, 360px);
+                                    close-policy: close-on-click-outside;
+                                    Rectangle {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        background: Theme.surface-raised;
+                                        border-radius: 8px;
+                                        border-width: 1px;
+                                        border-color: Theme.surface-selected;
+                                        drop-shadow-blur: 12px;
+                                        drop-shadow-color: Theme.shadow;
+                                        ScrollView {
+                                            width: parent.width;
+                                            height: parent.height;
+                                            // Opens with the current version in view.
+                                            init => {
+                                                self.content-y = -clamp(root.version-index * 34px, 0px, max(0px, version-list.preferred-height - self.visible-height));
+                                            }
+                                            version-list := VerticalLayout {
+                                                width: parent.width;
+                                                padding: 12px;
+                                                spacing: 2px;
+                                                for label[i] in root.versions: VersionRow {
+                                                    text: label;
+                                                    current: i == root.version-index;
+                                                    clicked => {
+                                                        root.choose-version(i);
+                                                        version-popup.close();
+                                                    }
                                                 }
                                             }
                                         }
@@ -2935,6 +3041,9 @@ export component AppWindow inherits Window {
     in property <string> game-status-label;
     in property <[StatusOption]> game-status-options;
     callback toggle-status(int, bool);
+    in property <[string]> game-versions;
+    in property <int> game-version-index;
+    callback choose-game-version(int);
     in property <int> grid-focus-row: -1;
     in-out property <length> grid-scroll <=> library.scroll-y;
     in property <float> grid-focus-top;
@@ -3162,6 +3271,9 @@ export component AppWindow inherits Window {
             status-label: root.game-status-label;
             status-options: root.game-status-options;
             toggle-status(index, on) => { root.toggle-status(index, on); }
+            versions: root.game-versions;
+            version-index: root.game-version-index;
+            choose-version(index) => { root.choose-game-version(index); }
         }
         if root.screen == 4: SettingsPage {
             modal-open: root.dialog-open || root.remap-open || root.about-open;
