@@ -438,6 +438,76 @@ component VersionRow inherits Rectangle {
     }
 }
 
+/// A button showing the current choice that opens a menu of the others. Long menus scroll.
+component Dropdown inherits Rectangle {
+    in property <[string]> labels;
+    in property <int> index;
+    callback chosen(int);
+    width: label.preferred-width;
+    Button {
+        width: parent.width;
+        height: parent.height;
+        accessible-role: button;
+        accessible-label: root.labels[root.index];
+        clicked => { popup.show(); }
+    }
+    label := HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 8px;
+        Text {
+            vertical-alignment: center;
+            text: root.labels[root.index];
+            color: Palette.control-foreground;
+            accessible-role: none;
+        }
+        Path {
+            y: (parent.height - self.height) / 2;
+            width: 8px;
+            height: 5px;
+            commands: "M 0 0 L 8 0 L 4 5 Z";
+            fill: Palette.control-foreground;
+        }
+    }
+    popup := PopupWindow {
+        y: parent.height + 4px;
+        width: clamp(list.preferred-width, 260px, 420px);
+        height: min(list.preferred-height, 360px);
+        close-policy: close-on-click-outside;
+        Rectangle {
+            width: parent.width;
+            height: parent.height;
+            background: Theme.surface-raised;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: Theme.surface-selected;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: Theme.shadow;
+            ScrollView {
+                width: parent.width;
+                height: parent.height;
+                // Opens with the current choice in view.
+                init => {
+                    self.content-y = -clamp(root.index * 34px, 0px, max(0px, list.preferred-height - self.visible-height));
+                }
+                list := VerticalLayout {
+                    width: parent.width;
+                    padding: 12px;
+                    spacing: 2px;
+                    for entry[i] in root.labels: VersionRow {
+                        text: entry;
+                        current: i == root.index;
+                        clicked => {
+                            root.chosen(i);
+                            popup.close();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 component SidebarItem inherits Rectangle {
     in property <bool> focus-enabled: true;
     in property <string> label;
@@ -1505,6 +1575,9 @@ component GamePage inherits FocusScope {
     in property <[string]> versions;
     in property <int> version-index;
     callback choose-version(int);
+    in property <[string]> files;
+    in property <int> file-index;
+    callback choose-file(int);
 
     in-out property <length> scroll-y <=> page.content-y;
     changed scroll-y => {
@@ -1723,71 +1796,15 @@ component GamePage inherits FocusScope {
                                     }
                                 }
                             }
-                            if root.versions.length > 1: Rectangle {
-                                width: version-label.preferred-width;
-                                Button {
-                                    width: parent.width;
-                                    height: parent.height;
-                                    accessible-role: button;
-                                    accessible-label: root.versions[root.version-index];
-                                    clicked => { version-popup.show(); }
-                                }
-                                version-label := HorizontalLayout {
-                                    padding-left: 12px;
-                                    padding-right: 12px;
-                                    spacing: 8px;
-                                    Text {
-                                        vertical-alignment: center;
-                                        text: root.versions[root.version-index];
-                                        color: Palette.control-foreground;
-                                        accessible-role: none;
-                                    }
-                                    Path {
-                                        y: (parent.height - self.height) / 2;
-                                        width: 8px;
-                                        height: 5px;
-                                        commands: "M 0 0 L 8 0 L 4 5 Z";
-                                        fill: Palette.control-foreground;
-                                    }
-                                }
-                                version-popup := PopupWindow {
-                                    y: parent.height + 4px;
-                                    width: clamp(version-list.preferred-width, 260px, 420px);
-                                    // Some games have dozens of versions, so the menu scrolls rather than run off the window.
-                                    height: min(version-list.preferred-height, 360px);
-                                    close-policy: close-on-click-outside;
-                                    Rectangle {
-                                        width: parent.width;
-                                        height: parent.height;
-                                        background: Theme.surface-raised;
-                                        border-radius: 8px;
-                                        border-width: 1px;
-                                        border-color: Theme.surface-selected;
-                                        drop-shadow-blur: 12px;
-                                        drop-shadow-color: Theme.shadow;
-                                        ScrollView {
-                                            width: parent.width;
-                                            height: parent.height;
-                                            // Opens with the current version in view.
-                                            init => {
-                                                self.content-y = -clamp(root.version-index * 34px, 0px, max(0px, version-list.preferred-height - self.visible-height));
-                                            }
-                                            version-list := VerticalLayout {
-                                                width: parent.width;
-                                                padding: 12px;
-                                                spacing: 2px;
-                                                for label[i] in root.versions: VersionRow {
-                                                    text: label;
-                                                    current: i == root.version-index;
-                                                    clicked => {
-                                                        root.choose-version(i);
-                                                        version-popup.close();
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                            if root.versions.length > 1: Dropdown {
+                                labels: root.versions;
+                                index: root.version-index;
+                                chosen(i) => { root.choose-version(i); }
+                            }
+                            if root.files.length > 1: Dropdown {
+                                labels: root.files;
+                                index: root.file-index;
+                                chosen(i) => { root.choose-file(i); }
                             }
                         }
                         if root.status != "": Text { horizontal-alignment: Locale.start; text: root.status; color: Theme.text-secondary; wrap: word-wrap; }
@@ -3044,6 +3061,9 @@ export component AppWindow inherits Window {
     in property <[string]> game-versions;
     in property <int> game-version-index;
     callback choose-game-version(int);
+    in property <[string]> game-files;
+    in property <int> game-file-index;
+    callback choose-game-file(int);
     in property <int> grid-focus-row: -1;
     in-out property <length> grid-scroll <=> library.scroll-y;
     in property <float> grid-focus-top;
@@ -3274,6 +3294,9 @@ export component AppWindow inherits Window {
             versions: root.game-versions;
             version-index: root.game-version-index;
             choose-version(index) => { root.choose-game-version(index); }
+            files: root.game-files;
+            file-index: root.game-file-index;
+            choose-file(index) => { root.choose-game-file(index); }
         }
         if root.screen == 4: SettingsPage {
             modal-open: root.dialog-open || root.remap-open || root.about-open;

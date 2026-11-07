@@ -349,6 +349,20 @@ impl Store {
                  COMMIT;",
             )?;
         }
+        if version < 16 {
+            conn.execute_batch(
+                "BEGIN;
+                 CREATE TABLE in_game_save_sync_new (rom_id INTEGER NOT NULL,
+                   variant TEXT NOT NULL DEFAULT '', md5 TEXT NOT NULL, synced_at INTEGER NOT NULL,
+                   PRIMARY KEY (rom_id, variant));
+                 INSERT INTO in_game_save_sync_new (rom_id, md5, synced_at)
+                   SELECT rom_id, md5, synced_at FROM in_game_save_sync;
+                 DROP TABLE in_game_save_sync;
+                 ALTER TABLE in_game_save_sync_new RENAME TO in_game_save_sync;
+                 PRAGMA user_version = 16;
+                 COMMIT;",
+            )?;
+        }
         Ok(Self { conn })
     }
 
@@ -372,6 +386,43 @@ impl Store {
         self.conn
             .execute("DELETE FROM kv WHERE key = ?1", [key])
             .expect("delete kv");
+    }
+
+    /// The files a multi-file game can start with, the one RomP starts by itself first; empty
+    /// when it has no choice.
+    pub fn file_choices(&self, id: i64) -> Vec<String> {
+        json_column(self.get(&format!("file_choices:{id}")))
+    }
+
+    /// Whether the files a game can start with were ever looked up.
+    pub fn knows_file_choices(&self, id: i64) -> bool {
+        self.get(&format!("file_choices:{id}")).is_some()
+    }
+
+    pub fn set_file_choices(&self, id: i64, files: &[String]) {
+        let files = if files.len() < 2 { &[] } else { files };
+        self.set(
+            &format!("file_choices:{id}"),
+            &serde_json::to_string(files).expect("file list"),
+        );
+    }
+
+    /// The file the player chose to start a game with, when it isn't the one RomP would.
+    pub fn chosen_file(&self, id: i64) -> Option<String> {
+        let chosen = self.get(&format!("chosen_file:{id}"))?;
+        let choices = self.file_choices(id);
+        choices[1.min(choices.len())..]
+            .contains(&chosen)
+            .then_some(chosen)
+    }
+
+    pub fn choose_file(&self, id: i64, file: &str) {
+        let key = format!("chosen_file:{id}");
+        if self.file_choices(id).first().is_some_and(|f| f == file) {
+            self.remove(&key);
+        } else {
+            self.set(&key, file);
+        }
     }
 
     pub fn replace_platforms(&mut self, platforms: &[Platform]) {
@@ -1030,11 +1081,13 @@ impl Store {
             .expect("delete state record");
     }
 
-    pub fn in_game_save_record(&self, rom_id: i64) -> Option<InGameSaveRecord> {
+    /// The in-game save last synced for a game, or for one of its files (`variant`, "" for the
+    /// game itself).
+    pub fn in_game_save_record(&self, rom_id: i64, variant: &str) -> Option<InGameSaveRecord> {
         self.conn
             .query_row(
-                "SELECT md5, synced_at FROM in_game_save_sync WHERE rom_id = ?1",
-                [rom_id],
+                "SELECT md5, synced_at FROM in_game_save_sync WHERE rom_id = ?1 AND variant = ?2",
+                params![rom_id, variant],
                 |r| {
                     Ok(InGameSaveRecord {
                         md5: r.get(0)?,
@@ -1045,12 +1098,20 @@ impl Store {
             .ok()
     }
 
-    pub fn set_in_game_save_record(&mut self, rom_id: i64, md5: &str, synced_at: i64) {
+    pub fn set_in_game_save_record(
+        &mut self,
+        rom_id: i64,
+        variant: &str,
+        md5: &str,
+        synced_at: i64,
+    ) {
         self.conn
             .execute(
-                "INSERT INTO in_game_save_sync (rom_id, md5, synced_at) VALUES (?1, ?2, ?3)
-                 ON CONFLICT(rom_id) DO UPDATE SET md5 = excluded.md5, synced_at = excluded.synced_at",
-                params![rom_id, md5, synced_at],
+                "INSERT INTO in_game_save_sync (rom_id, variant, md5, synced_at)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(rom_id, variant) DO UPDATE SET md5 = excluded.md5,
+                   synced_at = excluded.synced_at",
+                params![rom_id, variant, md5, synced_at],
             )
             .expect("write in-game save record");
     }
@@ -1178,6 +1239,30 @@ mod tests {
 
     fn ids(s: &Store, f: GameFilter) -> Vec<i64> {
         s.games(&f).into_iter().map(|g| g.id).collect()
+    }
+
+    #[test]
+    fn a_chosen_file_is_kept_only_while_the_game_still_offers_it() {
+        let s = Store::open_in_memory().unwrap();
+        let files = [
+            "Hyper.smc".to_string(),
+            "Advent.smc".into(),
+            "Original.zip".into(),
+        ];
+        s.set_file_choices(7, &files);
+        assert_eq!(s.file_choices(7), files);
+        assert_eq!(s.chosen_file(7), None);
+        s.choose_file(7, "Advent.smc");
+        assert_eq!(s.chosen_file(7).as_deref(), Some("Advent.smc"));
+        s.choose_file(7, "Hyper.smc");
+        assert_eq!(s.chosen_file(7), None);
+        s.choose_file(7, "Original.zip");
+        s.set_file_choices(7, &files[..2]);
+        assert_eq!(s.chosen_file(7), None);
+        assert!(!s.knows_file_choices(8));
+        s.set_file_choices(7, &files[..1]);
+        assert!(s.file_choices(7).is_empty());
+        assert!(s.knows_file_choices(7));
     }
 
     #[test]
@@ -1655,19 +1740,19 @@ mod tests {
         let path = dir.path().join("c.db");
         {
             let mut s = Store::open(&path).unwrap();
-            assert_eq!(s.in_game_save_record(7), None);
-            s.set_in_game_save_record(7, "aaa", 100);
-            s.set_in_game_save_record(7, "bbb", 200);
+            assert_eq!(s.in_game_save_record(7, ""), None);
+            s.set_in_game_save_record(7, "", "aaa", 100);
+            s.set_in_game_save_record(7, "", "bbb", 200);
         }
         let s = Store::open(&path).unwrap();
         assert_eq!(
-            s.in_game_save_record(7),
+            s.in_game_save_record(7, ""),
             Some(InGameSaveRecord {
                 md5: "bbb".into(),
                 synced_at: 200
             })
         );
-        assert_eq!(s.in_game_save_record(8), None);
+        assert_eq!(s.in_game_save_record(8, ""), None);
     }
 
     #[test]
@@ -1835,6 +1920,29 @@ mod tests {
         assert_eq!(s.get("last_sync_at"), None);
         assert_eq!(s.get("versions_repaired"), None);
         assert_eq!(card_of(&s, 5), "romm-1-5");
+    }
+
+    #[test]
+    fn v15_database_keeps_its_save_records_for_each_game_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("v15.db");
+        {
+            let s = Store::open(&path).unwrap();
+            s.conn
+                .execute_batch(
+                    "DROP TABLE in_game_save_sync;
+                     CREATE TABLE in_game_save_sync (rom_id INTEGER PRIMARY KEY,
+                       md5 TEXT NOT NULL, synced_at INTEGER NOT NULL);
+                     INSERT INTO in_game_save_sync VALUES (5, 'abc', 100);
+                     PRAGMA user_version = 15;",
+                )
+                .unwrap();
+        }
+        let mut s = Store::open(&path).unwrap();
+        assert_eq!(s.in_game_save_record(5, "").unwrap().md5, "abc");
+        s.set_in_game_save_record(5, "Advent", "def", 200);
+        assert_eq!(s.in_game_save_record(5, "").unwrap().md5, "abc");
+        assert_eq!(s.in_game_save_record(5, "Advent").unwrap().md5, "def");
     }
 
     #[test]

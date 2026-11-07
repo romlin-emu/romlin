@@ -60,7 +60,10 @@ async fn sync_game(
         .map_err(|e| Error::Decode(e.to_string()))?
         .map_err(|e| Error::Decode(format!("Could not pack Eden saves: {e}")))?;
     }
-    let last = store.lock().unwrap().in_game_save_record(game.rom_id);
+    let last = store
+        .lock()
+        .unwrap()
+        .in_game_save_record(game.rom_id, game.record_variant());
     let sram = saves::sync_sram(client, device_id, game, last.as_ref()).await?;
     saves::remember_outcome(store, game, &sram);
     if let Some(version) = core_version {
@@ -114,18 +117,30 @@ impl Controller {
     }
 
     pub(super) fn game_saves(&self, detail: &GameDetail) -> Option<GameSaves> {
-        let dir = paths::game_save_dir(&paths::data_dir(), &self.server(), detail.id);
         if detail.platform_slug == crate::eden::PLATFORM {
             return Some(GameSaves {
                 rom_id: detail.id,
-                dir,
+                dir: paths::game_save_dir(&paths::data_dir(), &self.server(), detail.id),
                 title: detail.title.clone(),
                 emulator: "eden".into(),
                 save_file: crate::eden::saves::FILE.into(),
                 save_emulator: "eden".into(),
+                variant: None,
             });
         }
         let core = core_for_platform(&detail.platform_slug)?;
+        let variant = self
+            .shared
+            .store
+            .lock()
+            .unwrap()
+            .chosen_file(detail.id)
+            .map(|file| crate::saves::variant_of(&file));
+        let base = paths::game_save_dir(&paths::data_dir(), &self.server(), detail.id);
+        let dir = match &variant {
+            Some(variant) => base.join(crate::saves::VARIANTS).join(variant),
+            None => base,
+        };
         if core.id == "melondsds" {
             if let Err(e) = crate::saves::adopt_desmume_saves(&dir) {
                 tracing::warn!("moving {}'s DeSmuME save to melonDS: {e}", detail.title);
@@ -140,6 +155,7 @@ impl Controller {
             emulator: core.id.to_string(),
             save_file,
             save_emulator,
+            variant,
         })
     }
 
@@ -344,6 +360,7 @@ mod tests {
             emulator: "eden".into(),
             save_file: crate::eden::saves::FILE.into(),
             save_emulator: "eden".into(),
+            variant: None,
         };
         let store = Mutex::new(Store::open_in_memory().unwrap());
         let client = Client::new(base_of(&server, "/")).with_token("t".into());
@@ -353,7 +370,7 @@ mod tests {
                 .unwrap(),
             SramOutcome::Uploaded
         );
-        assert!(store.lock().unwrap().in_game_save_record(5).is_some());
+        assert!(store.lock().unwrap().in_game_save_record(5, "").is_some());
         let requests = server.received_requests().await.unwrap();
         let upload = requests.iter().find(|r| r.method == "POST").unwrap();
         let archive = std::fs::read(game.dir.join(crate::eden::saves::FILE)).unwrap();
