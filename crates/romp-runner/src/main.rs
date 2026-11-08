@@ -92,7 +92,7 @@ fn main() -> anyhow::Result<()> {
         )
         .init();
     if std::env::args().nth(1).as_deref() == Some("--probe-vulkan") {
-        std::process::exit(if hw_vulkan::probe() { 0 } else { 1 });
+        std::process::exit(hw_vulkan::probe().exit_code());
     }
     // A core's fault filter passes on the faults it doesn't claim, to whatever came before it.
     #[cfg(target_os = "linux")]
@@ -232,6 +232,7 @@ fn run(args: &Args, frontend: &mut Frontend, link: &Link) -> anyhow::Result<()> 
     saves.load_initial_sram(&mut core, frontend);
     // Some cores initialise lazily on the first run, and some boot on a thread of their own
     // and refuse a state until they have, so loading is retried for a while.
+    let mut rumbled = false;
     let mut resume = args
         .load_slot
         .map(|slot| (slot, Instant::now() + RESUME_WAIT));
@@ -395,6 +396,13 @@ fn run(args: &Args, frontend: &mut Frontend, link: &Link) -> anyhow::Result<()> 
                     }
                     sample_rate = new_rate;
                 }
+            }
+            for (port, strong, weak) in frontend.take_rumble() {
+                if !rumbled {
+                    rumbled = true;
+                    info!(port, strong, weak, "the core rumbled");
+                }
+                link.send(&RunnerMsg::Rumble { port, strong, weak });
             }
             let resume_started = Instant::now();
             if let Some((slot, give_up)) = resume {

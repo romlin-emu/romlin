@@ -1,4 +1,4 @@
-use super::Store;
+use super::{Store, SHOWN};
 use rusqlite::params;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,12 +85,17 @@ impl Store {
     pub fn collections(&self, downloaded_only: bool) -> Vec<CollectionItem> {
         let mut stmt = self
             .conn
-            .prepare(
-                "SELECT c.key, c.kind, c.remote_id, c.name, c.owner,
-                        (SELECT COUNT(*) FROM collection_roms m JOIN games g ON g.id = m.rom_id
-                         WHERE m.key = c.key AND (?1 = 0 OR g.local_path IS NOT NULL))
-                 FROM collections c ORDER BY c.kind, c.name COLLATE NOCASE, c.position",
-            )
+            .prepare(&format!(
+                "WITH {SHOWN},
+                 member_groups AS (SELECT DISTINCT m.key, g.card FROM collection_roms m
+                                     JOIN games g ON g.id = m.rom_id)
+                 SELECT c.key, c.kind, c.remote_id, c.name, c.owner, COALESCE(SUM(s.entries), 0)
+                 FROM collections c
+                 LEFT JOIN member_groups x ON x.key = c.key
+                 LEFT JOIN shown s ON s.card = x.card
+                 GROUP BY c.key
+                 ORDER BY c.kind, c.name COLLATE NOCASE, c.position",
+            ))
             .expect("prepare");
         stmt.query_map([downloaded_only], |r| {
             Ok(CollectionItem {
@@ -140,6 +145,14 @@ impl Store {
             .collect()
     }
 
+    /// The versions of `rom_id`'s game that are in the collection.
+    pub fn group_members_in(&self, key: &str, rom_id: i64) -> Vec<i64> {
+        self.group_members(rom_id)
+            .into_iter()
+            .filter(|&id| self.memberships(id).iter().any(|k| k == key))
+            .collect()
+    }
+
     pub fn rename_collection(&mut self, key: &str, name: &str) {
         self.conn
             .execute(
@@ -178,7 +191,7 @@ fn insert(tx: &rusqlite::Transaction, r: &CollectionRecord, position: i64) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::romm::types::rom;
+    use crate::romm::types::{rom, MatchIds, Rom, SiblingRom};
     use crate::store::{GameFilter, Scope};
 
     fn record(key: &str, kind: CollectionKind, name: &str, rom_ids: &[i64]) -> CollectionRecord {
@@ -275,6 +288,37 @@ mod tests {
         s.delete_collection("c:4");
         assert!(s.collection("c:4").is_none());
         assert_eq!(s.memberships(1), ["v:Zz"]);
+    }
+
+    #[test]
+    fn group_members_in_a_collection_are_only_the_real_members() {
+        let mut s = seeded();
+        let same = MatchIds {
+            igdb_id: Some(7),
+            ..MatchIds::default()
+        };
+        s.upsert_games(&[
+            Rom {
+                sibling_roms: vec![SiblingRom { id: 11 }, SiblingRom { id: 12 }],
+                match_ids: same.clone(),
+                ..rom(10, 1, "D", "t")
+            },
+            Rom {
+                sibling_roms: vec![SiblingRom { id: 10 }, SiblingRom { id: 12 }],
+                match_ids: same.clone(),
+                ..rom(11, 1, "D", "t")
+            },
+            Rom {
+                sibling_roms: vec![SiblingRom { id: 10 }, SiblingRom { id: 11 }],
+                match_ids: same,
+                ..rom(12, 1, "D", "t")
+            },
+        ]);
+        s.set_member("c:1", 11, true);
+        assert_eq!(s.group_members_in("c:1", 10), [11]);
+        assert_eq!(s.group_members_in("c:1", 3), [3]);
+        assert!(s.group_members_in("c:1", 1).is_empty());
+        assert!(s.group_members_in("c:4", 12).is_empty());
     }
 
     #[test]

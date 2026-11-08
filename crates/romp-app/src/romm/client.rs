@@ -1,6 +1,7 @@
 use crate::romm::types::{
-    DeviceAuth, Firmware, Heartbeat, InstallRequest, Platform, PollOutcome, RemoteCollection,
-    RemoteNotification, RemoteSave, RemoteState, RomDetail, RomFile, RomPage, User,
+    DeviceAuth, Firmware, Heartbeat, InstallRequest, Platform, PlayStatus, PollOutcome, Progress,
+    RemoteCollection, RemoteNotification, RemoteSave, RemoteState, RomDetail, RomFile, RomPage,
+    User,
 };
 use crate::store::PlaySession;
 use serde::de::DeserializeOwned;
@@ -297,6 +298,64 @@ impl Client {
             ("with_rom_id_index", "false".to_string()),
         ];
         self.get_json("/api/roms", &query).await
+    }
+
+    pub async fn status_roms(&self, offset: i64, limit: i64) -> Result<RomPage, Error> {
+        let mut query = vec![
+            ("offset", offset.to_string()),
+            ("limit", limit.to_string()),
+            ("order_by", "id".to_string()),
+            ("with_char_index", "false".to_string()),
+            ("with_filter_values", "false".to_string()),
+            ("with_rom_id_index", "false".to_string()),
+        ];
+        for status in ["now_playing", "backlogged"]
+            .into_iter()
+            .chain(Progress::ALL.map(Progress::as_str))
+        {
+            query.push(("statuses", status.to_string()));
+        }
+        self.get_json("/api/roms", &query).await
+    }
+
+    pub async fn set_play_status(&self, id: i64, status: PlayStatus) -> Result<(), Error> {
+        self.send(
+            self.request(reqwest::Method::PUT, &format!("/api/roms/{id}/props"))
+                .json(&serde_json::json!({
+                    "now_playing": status.now_playing,
+                    "backlogged": status.backlogged,
+                    "status": status.progress.map(Progress::as_str),
+                })),
+        )
+        .await
+        .map(|_| ())
+    }
+
+    /// The ROM id RomM shows for each game when versions are grouped, in its list order.
+    pub async fn picked_rom_ids(&self) -> Result<Vec<i64>, Error> {
+        #[derive(serde::Deserialize)]
+        struct Index {
+            #[serde(default)]
+            rom_id_index: Vec<i64>,
+        }
+        let query = [
+            ("group_by_meta_id", "true".to_string()),
+            ("with_rom_id_index", "true".to_string()),
+            ("limit", "1".to_string()),
+            ("with_char_index", "false".to_string()),
+            ("with_filter_values", "false".to_string()),
+        ];
+        let index: Index = self.get_json("/api/roms", &query).await?;
+        Ok(index.rom_id_index)
+    }
+
+    pub async fn set_main_version(&self, id: i64) -> Result<(), Error> {
+        self.send(
+            self.request(reqwest::Method::PUT, &format!("/api/roms/{id}/props"))
+                .json(&serde_json::json!({ "is_main_sibling": true })),
+        )
+        .await
+        .map(|_| ())
     }
 
     pub async fn mark_played(&self, id: i64) -> Result<(), Error> {
@@ -1083,6 +1142,82 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn status_roms_asks_for_games_with_any_play_status() {
+        let server = MockServer::start().await;
+        let mut mock = Mock::given(method("GET"))
+            .and(path("/api/roms"))
+            .and(query_param("offset", "0"))
+            .and(query_param("limit", "100"));
+        for status in [
+            "now_playing",
+            "backlogged",
+            "incomplete",
+            "finished",
+            "completed_100",
+            "retired",
+            "never_playing",
+        ] {
+            mock = mock.and(query_param("statuses", status));
+        }
+        mock.respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "items": [{
+                "id": 7, "platform_id": 1, "name": "A", "fs_name": "a.md", "summary": null,
+                "updated_at": "t", "path_cover_small": null, "path_cover_large": null,
+                "fs_size_bytes": 1, "rom_user": {"backlogged": true}
+            }]
+        })))
+        .mount(&server)
+        .await;
+        let page = authed(&server).status_roms(0, 100).await.unwrap();
+        assert!(page.items[0].play_status().backlogged);
+    }
+
+    #[tokio::test]
+    async fn set_play_status_sends_every_field_so_cleared_ones_clear() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(path("/api/roms/7/props"))
+            .and(query_param_is_missing("update_last_played"))
+            .and(body_json(serde_json::json!({
+                "now_playing": true, "backlogged": false, "status": null
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("PUT"))
+            .and(path("/api/roms/8/props"))
+            .and(body_json(serde_json::json!({
+                "now_playing": false, "backlogged": false, "status": "finished"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = authed(&server);
+        client
+            .set_play_status(
+                7,
+                PlayStatus {
+                    now_playing: true,
+                    ..PlayStatus::default()
+                },
+            )
+            .await
+            .unwrap();
+        client
+            .set_play_status(
+                8,
+                PlayStatus {
+                    progress: Some(Progress::Finished),
+                    ..PlayStatus::default()
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
     async fn avatar_downloads_the_users_picture() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))
@@ -1415,6 +1550,7 @@ pub(crate) mod tests {
             file_path: String::new(),
             file_size_bytes: 0,
             sha1_hash: None,
+            category: None,
         };
         assert_eq!(
             client.rom_file_url(3672, &f).as_str(),
@@ -1788,5 +1924,82 @@ pub(crate) mod tests {
             3
         );
         assert_eq!(client.download_state(3).await.unwrap(), b"STATE");
+    }
+
+    #[test]
+    fn rom_parses_sibling_ids() {
+        let mut json = serde_json::json!({
+            "id": 1, "platform_id": 2, "name": "X", "fs_name": "X.bin",
+            "summary": null, "updated_at": "t", "path_cover_small": null,
+            "path_cover_large": null, "fs_size_bytes": 1,
+            "sibling_roms": [{"id": 7, "name": "X", "fs_name_no_tags": "X",
+                "fs_name_no_ext": "X (Japan)", "is_main_sibling": false}]
+        });
+        let rom: crate::romm::types::Rom = serde_json::from_value(json.clone()).unwrap();
+        assert_eq!(rom.sibling_roms, [crate::romm::types::SiblingRom { id: 7 }]);
+        json.as_object_mut().unwrap().remove("sibling_roms");
+        let rom: crate::romm::types::Rom = serde_json::from_value(json).unwrap();
+        assert!(rom.sibling_roms.is_empty());
+    }
+
+    #[test]
+    fn rom_parses_match_ids() {
+        let rom: crate::romm::types::Rom = serde_json::from_value(serde_json::json!({
+            "id": 1, "platform_id": 2, "name": "X", "fs_name": "X.bin",
+            "summary": null, "updated_at": "t", "path_cover_small": null,
+            "path_cover_large": null, "fs_size_bytes": 1,
+            "igdb_id": null, "ra_id": 5, "flashpoint_id": "abc-1"
+        }))
+        .unwrap();
+        assert_eq!(rom.match_ids.igdb_id, None);
+        assert_eq!(rom.match_ids.ra_id, Some(5));
+        assert_eq!(rom.match_ids.flashpoint_id.as_deref(), Some("abc-1"));
+        assert_eq!(rom.match_ids.steam_id, None);
+    }
+
+    #[tokio::test]
+    async fn picked_rom_ids_asks_for_the_grouped_index() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/roms"))
+            .and(query_param("group_by_meta_id", "true"))
+            .and(query_param("with_rom_id_index", "true"))
+            .and(query_param("limit", "1"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"items": [], "rom_id_index": [3, 1, 2]})),
+            )
+            .mount(&server)
+            .await;
+        let client = Client::new(base_of(&server, "/"));
+        assert_eq!(client.picked_rom_ids().await.unwrap(), vec![3, 1, 2]);
+    }
+
+    #[tokio::test]
+    async fn picked_rom_ids_is_empty_without_an_index() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/roms"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"items": []})),
+            )
+            .mount(&server)
+            .await;
+        let client = Client::new(base_of(&server, "/"));
+        assert_eq!(client.picked_rom_ids().await.unwrap(), Vec::<i64>::new());
+    }
+
+    #[tokio::test]
+    async fn set_main_version_puts_the_flag() {
+        let server = MockServer::start().await;
+        Mock::given(method("PUT"))
+            .and(path("/api/roms/5/props"))
+            .and(body_json(serde_json::json!({"is_main_sibling": true})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let client = Client::new(base_of(&server, "/"));
+        client.set_main_version(5).await.unwrap();
     }
 }

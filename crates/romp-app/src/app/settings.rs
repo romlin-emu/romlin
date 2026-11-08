@@ -97,6 +97,7 @@ impl Controller {
             achievement_corner: index_within(ui.get_pref_achievement_corner(), &popups::CORNERS),
             check_updates: ui.get_pref_check_updates(),
             accept_installs: ui.get_pref_accept_installs(),
+            whats_new: self.prefs.get().whats_new,
         };
         let before = self.prefs.get();
         if prefs == before {

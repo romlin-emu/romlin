@@ -18,6 +18,8 @@ pub struct Preferences {
     pub check_updates: bool,
     /// Whether Romlin offers itself under RomM's "Install on device", and downloads what comes.
     pub accept_installs: bool,
+    /// Whether a new version shows what's new in it the first time it runs.
+    pub whats_new: bool,
 }
 
 impl Default for Preferences {
@@ -32,6 +34,7 @@ impl Default for Preferences {
             achievement_corner: 0,
             check_updates: true,
             accept_installs: true,
+            whats_new: true,
         }
     }
 }
@@ -156,5 +159,12 @@ mod tests {
         assert!(!p.accept_installs);
         assert!(p.pause_unfocused);
         assert!(!p.to_json().contains("language"));
+    }
+
+    #[test]
+    fn whats_new_shows_after_updates_unless_turned_off() {
+        assert!(Preferences::default().whats_new);
+        assert!(Preferences::from_json(Some("{}")).whats_new);
+        assert!(!Preferences::from_json(Some(r#"{"whats_new":false}"#)).whats_new);
     }
 }

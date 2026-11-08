@@ -13,59 +13,48 @@ pub fn prepare(game_mode: bool) {
 #[cfg(not(target_os = "linux"))]
 pub fn prepare(_game_mode: bool) {}
 
+use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
+
 pub trait TokenStore: Send + Sync {
-    fn load(&self, server: &str) -> Option<String>;
-    fn save(&self, server: &str, token: &str) -> Result<(), String>;
-    fn delete(&self, server: &str);
+    fn load(&self, account: &str) -> Option<String>;
+    fn save(&self, account: &str, token: &str) -> Result<(), String>;
+    fn delete(&self, account: &str);
 }
 
-pub struct Keychain {
-    service: &'static str,
+pub trait Secrets: Send + Sync {
+    fn get(&self, service: &str, account: &str) -> Result<Option<String>, String>;
+    fn set(&self, service: &str, account: &str, value: &str) -> Result<(), String>;
+    fn delete(&self, service: &str, account: &str);
 }
 
-// Keep the upstream service IDs so existing sign-ins remain available after the rename.
-impl Keychain {
-    pub fn retro_achievements() -> Keychain {
-        Keychain {
-            service: "Romp RetroAchievements",
-        }
-    }
+pub struct Keychain;
 
-    pub fn app() -> Migrating<Keychain, Keychain> {
-        Migrating {
-            current: Keychain { service: "Romp" },
-            legacy: Keychain {
-                service: "Cartridge",
-            },
-        }
-    }
-}
-
-impl TokenStore for Keychain {
-    fn load(&self, server: &str) -> Option<String> {
-        match keyring::Entry::new(self.service, server).and_then(|entry| entry.get_password()) {
-            Ok(token) => Some(token),
-            Err(keyring::Error::NoEntry) => None,
+impl Secrets for Keychain {
+    fn get(&self, service: &str, account: &str) -> Result<Option<String>, String> {
+        match keyring::Entry::new(service, account).and_then(|e| e.get_password()) {
+            Ok(value) => Ok(Some(value)),
+            Err(keyring::Error::NoEntry) => Ok(None),
             Err(error) => {
                 let error = error_cause(&error);
-                tracing::warn!(service = self.service, %error, "could not read saved sign-in");
-                None
+                tracing::warn!(service, %error, "could not read saved sign-in");
+                Err(error.to_string())
             }
         }
     }
 
-    fn save(&self, server: &str, token: &str) -> Result<(), String> {
-        keyring::Entry::new(self.service, server)
-            .and_then(|e| e.set_password(token))
+    fn set(&self, service: &str, account: &str, value: &str) -> Result<(), String> {
+        keyring::Entry::new(service, account)
+            .and_then(|e| e.set_password(value))
             .map_err(|error| {
-                let e = error_cause(&error);
-                tracing::warn!(service = self.service, error = %e, "could not store saved sign-in");
-                tr::tr!("Could not store the sign-in in the keychain: {e}", e)
+                let error = error_cause(&error);
+                tracing::warn!(service, %error, "could not store saved sign-in");
+                error.to_string()
             })
     }
 
-    fn delete(&self, server: &str) {
-        if let Ok(entry) = keyring::Entry::new(self.service, server) {
+    fn delete(&self, service: &str, account: &str) {
+        if let Ok(entry) = keyring::Entry::new(service, account) {
             let _ = entry.delete_credential();
         }
     }
@@ -79,48 +68,190 @@ fn error_cause(error: &keyring::Error) -> &keyring::Error {
         .unwrap_or(error)
 }
 
-pub struct Migrating<C, L> {
-    current: C,
-    legacy: L,
+const SERVICE: &str = "Romp";
+const ACCOUNT: &str = "sign-ins";
+
+type Tokens = BTreeMap<String, String>;
+
+#[derive(Clone, Copy)]
+enum Kind {
+    RomM,
+    RetroAchievements,
 }
 
-impl<C: TokenStore, L: TokenStore> TokenStore for Migrating<C, L> {
-    fn load(&self, server: &str) -> Option<String> {
-        if let Some(token) = self.current.load(server) {
-            return Some(token);
+impl Kind {
+    fn key(self, account: &str) -> String {
+        match self {
+            Kind::RomM => format!("romm:{account}"),
+            Kind::RetroAchievements => format!("ra:{account}"),
         }
-        let token = self.legacy.load(server)?;
-        if self.current.save(server, &token).is_ok() {
-            self.legacy.delete(server);
+    }
+
+    /// The items sign-ins were kept in before they shared one, newest first. The service names
+    /// stay as RomP chose them so existing sign-ins remain available.
+    fn legacy_services(self) -> &'static [&'static str] {
+        match self {
+            Kind::RomM => &["Romp", "Cartridge"],
+            Kind::RetroAchievements => &["Romp RetroAchievements"],
+        }
+    }
+}
+
+/// Every sign-in lives in one keychain item, read once, so a rebuilt app asks for the keychain password once.
+pub struct SignIns {
+    secrets: Box<dyn Secrets>,
+    cache: Mutex<Option<Tokens>>,
+}
+
+impl SignIns {
+    pub fn new(secrets: impl Secrets + 'static) -> Arc<SignIns> {
+        Arc::new(SignIns {
+            secrets: Box::new(secrets),
+            cache: Mutex::new(None),
+        })
+    }
+
+    pub fn romm(self: &Arc<Self>) -> Arc<dyn TokenStore> {
+        Arc::new(SignInsOf {
+            sign_ins: self.clone(),
+            kind: Kind::RomM,
+        })
+    }
+
+    pub fn retro_achievements(self: &Arc<Self>) -> Arc<dyn TokenStore> {
+        Arc::new(SignInsOf {
+            sign_ins: self.clone(),
+            kind: Kind::RetroAchievements,
+        })
+    }
+
+    /// A keychain that can't be read is an error, never an empty list, so a save can't overwrite the other sign-ins.
+    fn stored(&self, cache: &mut Option<Tokens>) -> Result<Tokens, String> {
+        if let Some(tokens) = cache {
+            return Ok(tokens.clone());
+        }
+        let tokens: Tokens = self
+            .secrets
+            .get(SERVICE, ACCOUNT)?
+            .and_then(|json| serde_json::from_str(&json).ok())
+            .unwrap_or_default();
+        *cache = Some(tokens.clone());
+        Ok(tokens)
+    }
+
+    fn store(&self, cache: &mut Option<Tokens>, tokens: Tokens) -> Result<(), String> {
+        if tokens.is_empty() {
+            self.secrets.delete(SERVICE, ACCOUNT);
+        } else {
+            let json = serde_json::to_string(&tokens).map_err(|e| e.to_string())?;
+            self.secrets.set(SERVICE, ACCOUNT, &json)?;
+        }
+        *cache = Some(tokens);
+        Ok(())
+    }
+
+    fn load(&self, kind: Kind, account: &str) -> Option<String> {
+        let mut cache = self.cache.lock().unwrap();
+        let mut tokens = self.stored(&mut cache).ok()?;
+        let key = kind.key(account);
+        if let Some(token) = tokens.get(&key) {
+            return Some(token.clone());
+        }
+        let (service, token) = kind.legacy_services().iter().find_map(|service| {
+            let token = self.secrets.get(service, account).ok()??;
+            Some((*service, token))
+        })?;
+        tokens.insert(key, token.clone());
+        if self.store(&mut cache, tokens).is_ok() {
+            self.secrets.delete(service, account);
         }
         Some(token)
     }
 
-    fn save(&self, server: &str, token: &str) -> Result<(), String> {
-        self.current.save(server, token)
+    fn save(&self, kind: Kind, account: &str, token: &str) -> Result<(), String> {
+        let mut cache = self.cache.lock().unwrap();
+        self.stored(&mut cache)
+            .and_then(|mut tokens| {
+                tokens.insert(kind.key(account), token.into());
+                self.store(&mut cache, tokens)
+            })
+            .map_err(|e| tr::tr!("Could not store the sign-in in the keychain: {e}", e))
     }
 
-    fn delete(&self, server: &str) {
-        self.current.delete(server);
-        self.legacy.delete(server);
+    fn delete(&self, kind: Kind, account: &str) {
+        let mut cache = self.cache.lock().unwrap();
+        if let Ok(mut tokens) = self.stored(&mut cache) {
+            if tokens.remove(&kind.key(account)).is_some() {
+                let _ = self.store(&mut cache, tokens);
+            }
+            for service in kind.legacy_services() {
+                self.secrets.delete(service, account);
+            }
+        }
+    }
+}
+
+struct SignInsOf {
+    sign_ins: Arc<SignIns>,
+    kind: Kind,
+}
+
+impl TokenStore for SignInsOf {
+    fn load(&self, account: &str) -> Option<String> {
+        self.sign_ins.load(self.kind, account)
+    }
+
+    fn save(&self, account: &str, token: &str) -> Result<(), String> {
+        self.sign_ins.save(self.kind, account, token)
+    }
+
+    fn delete(&self, account: &str) {
+        self.sign_ins.delete(self.kind, account);
     }
 }
 
 #[cfg(test)]
-#[derive(Default)]
-pub struct MemoryTokens(std::sync::Mutex<std::collections::HashMap<String, String>>);
+#[derive(Clone, Default)]
+pub struct MemorySecrets {
+    items: Arc<Mutex<std::collections::HashMap<(String, String), String>>>,
+    reads: Arc<std::sync::atomic::AtomicUsize>,
+    locked: Arc<std::sync::atomic::AtomicBool>,
+}
 
 #[cfg(test)]
-impl TokenStore for MemoryTokens {
-    fn load(&self, server: &str) -> Option<String> {
-        self.0.lock().unwrap().get(server).cloned()
+impl MemorySecrets {
+    fn item(&self, service: &str, account: &str) -> Option<String> {
+        let key = (service.to_string(), account.to_string());
+        self.items.lock().unwrap().get(&key).cloned()
     }
-    fn save(&self, server: &str, token: &str) -> Result<(), String> {
-        self.0.lock().unwrap().insert(server.into(), token.into());
+
+    fn reads(&self) -> usize {
+        self.reads.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    fn lock(&self, locked: bool) {
+        self.locked
+            .store(locked, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+#[cfg(test)]
+impl Secrets for MemorySecrets {
+    fn get(&self, service: &str, account: &str) -> Result<Option<String>, String> {
+        self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        if self.locked.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err("locked".into());
+        }
+        Ok(self.item(service, account))
+    }
+    fn set(&self, service: &str, account: &str, value: &str) -> Result<(), String> {
+        let key = (service.to_string(), account.to_string());
+        self.items.lock().unwrap().insert(key, value.into());
         Ok(())
     }
-    fn delete(&self, server: &str) {
-        self.0.lock().unwrap().remove(server);
+    fn delete(&self, service: &str, account: &str) {
+        let key = (service.to_string(), account.to_string());
+        self.items.lock().unwrap().remove(&key);
     }
 }
 
@@ -138,7 +269,7 @@ mod tests {
                 .with_ansi(false)
                 .with_writer(std::io::stderr)
                 .init();
-            let tokens = Keychain::app();
+            let tokens = SignIns::new(Keychain).romm();
             assert_eq!(tokens.load("https://debug.invalid/"), None);
             let error = tokens
                 .save("https://debug.invalid/", "ROMLIN_TEST_SECRET")
@@ -162,37 +293,112 @@ mod tests {
         let log = String::from_utf8_lossy(&output.stderr);
         assert!(output.status.success(), "{log}");
         assert!(log.contains("could not read saved sign-in"), "{log}");
-        assert!(log.contains("could not store saved sign-in"), "{log}");
         assert!(log.contains("Platform failure:"), "{log}");
         assert!(!log.contains("No default store has been set"), "{log}");
         assert!(!log.contains("ROMLIN_TEST_SECRET"), "{log}");
     }
 
     #[test]
-    fn a_sign_in_saved_under_the_old_name_moves_to_the_new_one() {
-        let tokens = Migrating {
-            current: MemoryTokens::default(),
-            legacy: MemoryTokens::default(),
-        };
-        tokens.legacy.save("http://a/", "old").unwrap();
+    fn a_sign_in_saved_under_the_oldest_name_moves_into_the_one_item() {
+        let secrets = MemorySecrets::default();
+        secrets.set("Cartridge", "http://a/", "old").unwrap();
+        let tokens = SignIns::new(secrets.clone()).romm();
         assert_eq!(tokens.load("http://a/").as_deref(), Some("old"));
-        assert_eq!(tokens.current.load("http://a/").as_deref(), Some("old"));
-        assert_eq!(tokens.legacy.load("http://a/"), None);
-        tokens.save("http://a/", "new").unwrap();
-        assert_eq!(tokens.load("http://a/").as_deref(), Some("new"));
-        tokens.legacy.save("http://a/", "stale").unwrap();
+        assert_eq!(secrets.item("Cartridge", "http://a/"), None);
+        tokens.delete("http://a/");
+        secrets.set("Cartridge", "http://a/", "stale").unwrap();
         tokens.delete("http://a/");
         assert_eq!(tokens.load("http://a/"), None);
     }
 
     #[test]
-    fn memory_tokens_are_per_server() {
-        let t = MemoryTokens::default();
-        t.save("http://a/", "one").unwrap();
-        t.save("http://b/", "two").unwrap();
-        assert_eq!(t.load("http://a/").as_deref(), Some("one"));
-        t.delete("http://a/");
-        assert_eq!(t.load("http://a/"), None);
-        assert_eq!(t.load("http://b/").as_deref(), Some("two"));
+    fn sign_ins_in_the_old_items_move_into_one() {
+        let secrets = MemorySecrets::default();
+        secrets.set("Romp", "http://a/", "romm").unwrap();
+        secrets
+            .set("Romp RetroAchievements", "beshr", "ra")
+            .unwrap();
+        let sign_ins = SignIns::new(secrets.clone());
+        assert_eq!(sign_ins.romm().load("http://a/").as_deref(), Some("romm"));
+        assert_eq!(
+            sign_ins.retro_achievements().load("beshr").as_deref(),
+            Some("ra")
+        );
+        assert_eq!(secrets.item("Romp", "http://a/"), None);
+        assert_eq!(secrets.item("Romp RetroAchievements", "beshr"), None);
+
+        let reopened = SignIns::new(secrets.clone());
+        assert_eq!(reopened.romm().load("http://a/").as_deref(), Some("romm"));
+        assert_eq!(
+            reopened.retro_achievements().load("beshr").as_deref(),
+            Some("ra")
+        );
+    }
+
+    #[test]
+    fn the_keychain_is_read_once() {
+        let secrets = MemorySecrets::default();
+        let sign_ins = SignIns::new(secrets.clone());
+        sign_ins.romm().save("http://a/", "romm").unwrap();
+        sign_ins.retro_achievements().save("beshr", "ra").unwrap();
+
+        let reopened = SignIns::new(secrets.clone());
+        let before = secrets.reads();
+        for _ in 0..3 {
+            assert_eq!(reopened.romm().load("http://a/").as_deref(), Some("romm"));
+            assert_eq!(
+                reopened.retro_achievements().load("beshr").as_deref(),
+                Some("ra")
+            );
+        }
+        assert_eq!(secrets.reads() - before, 1);
+    }
+
+    #[test]
+    fn a_keychain_that_cant_be_read_is_left_alone() {
+        let secrets = MemorySecrets::default();
+        SignIns::new(secrets.clone())
+            .romm()
+            .save("http://a/", "romm")
+            .unwrap();
+        let stored = secrets.item(SERVICE, ACCOUNT);
+
+        secrets.lock(true);
+        let sign_ins = SignIns::new(secrets.clone());
+        assert_eq!(sign_ins.romm().load("http://a/"), None);
+        assert!(sign_ins.retro_achievements().save("beshr", "ra").is_err());
+        sign_ins.romm().delete("http://a/");
+        assert_eq!(secrets.item(SERVICE, ACCOUNT), stored);
+
+        secrets.lock(false);
+        assert_eq!(sign_ins.romm().load("http://a/").as_deref(), Some("romm"));
+    }
+
+    #[test]
+    fn sign_ins_are_per_kind_and_account() {
+        let secrets = MemorySecrets::default();
+        let sign_ins = SignIns::new(secrets.clone());
+        sign_ins.romm().save("same", "one").unwrap();
+        sign_ins.romm().save("other", "two").unwrap();
+        sign_ins.retro_achievements().save("same", "three").unwrap();
+        sign_ins.romm().delete("same");
+        assert_eq!(sign_ins.romm().load("same"), None);
+        assert_eq!(sign_ins.romm().load("other").as_deref(), Some("two"));
+        assert_eq!(
+            sign_ins.retro_achievements().load("same").as_deref(),
+            Some("three")
+        );
+    }
+
+    #[test]
+    fn signing_out_of_everything_removes_the_item() {
+        let secrets = MemorySecrets::default();
+        let sign_ins = SignIns::new(secrets.clone());
+        sign_ins.romm().save("http://a/", "romm").unwrap();
+        sign_ins.retro_achievements().save("beshr", "ra").unwrap();
+        sign_ins.romm().delete("http://a/");
+        assert!(secrets.item(SERVICE, ACCOUNT).is_some());
+        sign_ins.retro_achievements().delete("beshr");
+        assert_eq!(secrets.item(SERVICE, ACCOUNT), None);
     }
 }

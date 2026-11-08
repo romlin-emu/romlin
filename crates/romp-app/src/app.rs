@@ -5,17 +5,20 @@ mod game;
 mod installs;
 mod navigation;
 mod notifications;
+mod play_status;
 mod save_sync;
 mod screenshots;
 mod settings;
 mod slots;
+mod surprise;
 mod updates;
+mod whats_new;
 
 use crate::cores::Cores;
 use crate::covers::Covers;
-use crate::credentials::{Keychain, TokenStore};
+use crate::credentials::{Keychain, SignIns, TokenStore};
 use crate::grid::{row_count, row_range, CoverSlots, RecentRows, RECENT_ROWS};
-use crate::restore::{LastView, Observed, Placement, VIEW_KEY, WINDOW_KEY};
+use crate::restore::{LastView, Observed, Placement, Sidebar, SIDEBAR_KEY, VIEW_KEY, WINDOW_KEY};
 use crate::romm::client::{check_version, server_candidates, Client, Error};
 use crate::romm::pairing::{PollStep, Poller};
 use crate::romm::types::{DeviceAuth, PollOutcome, User};
@@ -54,6 +57,7 @@ struct Shared {
     rt: Runtime,
     store: Arc<Mutex<Store>>,
     tokens: Arc<dyn TokenStore>,
+    ra_tokens: Arc<dyn TokenStore>,
     covers: Arc<Covers>,
     downloads: Arc<Semaphore>,
     cores: Arc<Cores>,
@@ -129,6 +133,7 @@ struct Controller {
     offline: Cell<bool>,
     offline_retry: RefCell<Option<Timer>>,
     selected: RefCell<String>,
+    surprise_last: Cell<Option<i64>>,
     expanded: RefCell<HashSet<String>>,
     platform_filter: RefCell<String>,
     sidebar_names: RefCell<Vec<(String, String)>>,
@@ -178,10 +183,12 @@ fn open_store() -> rusqlite::Result<Store> {
 pub fn run(game_mode: bool) -> anyhow::Result<()> {
     crate::credentials::prepare(game_mode);
     crate::vulkan::start_probe();
+    let sign_ins = SignIns::new(Keychain);
     let shared = Shared {
         rt: Runtime::new()?,
         store: Arc::new(Mutex::new(open_store()?)),
-        tokens: Arc::new(Keychain::app()),
+        tokens: sign_ins.romm(),
+        ra_tokens: sign_ins.retro_achievements(),
         covers: Arc::new(Covers::new(paths::covers_dir())),
         downloads: Arc::new(Semaphore::new(PARALLEL_DOWNLOADS)),
         cores: Arc::new(Cores::new(paths::cores_dir())),
@@ -199,6 +206,9 @@ pub fn run(game_mode: bool) -> anyhow::Result<()> {
         crate::prefs::Preferences::from_json(shared.store.lock().unwrap().get("prefs").as_deref());
     let placement = Placement::from_json(shared.store.lock().unwrap().get(WINDOW_KEY).as_deref());
     let last_view = LastView::from_json(shared.store.lock().unwrap().get(VIEW_KEY).as_deref());
+    let sidebar = Sidebar::from_json(shared.store.lock().unwrap().get(SIDEBAR_KEY).as_deref());
+    ui.set_sidebar_width(sidebar.width);
+    ui.set_sidebar_collapsed(sidebar.collapsed);
     let mappings = crate::mapping::Mappings::from_json(
         shared.store.lock().unwrap().get("mappings").as_deref(),
     );
@@ -235,6 +245,7 @@ pub fn run(game_mode: bool) -> anyhow::Result<()> {
         offline: Cell::new(false),
         offline_retry: RefCell::new(None),
         selected: RefCell::new("all".into()),
+        surprise_last: Cell::new(None),
         platform_filter: RefCell::default(),
         sidebar_names: RefCell::default(),
         expanded: RefCell::new(
@@ -356,6 +367,10 @@ impl Controller {
         ui.on_remap_close(|| with_controller(|c| c.remap_close()));
         ui.on_show_folder(|| with_controller(|c| c.show_folder()));
         ui.on_show_log(|| with_controller(|c| c.show_log()));
+        ui.on_open_whats_new(|| with_controller(|c| c.show_whats_new()));
+        ui.on_whats_new_after_updates_toggled(|on| {
+            with_controller(|c| c.set_whats_new_after_updates(on));
+        });
         ui.on_copy_log(|| with_controller(|c| c.copy_log()));
         ui.on_select(|key| {
             with_controller(|c| {
@@ -374,6 +389,21 @@ impl Controller {
         ui.on_new_collection_with_game(|| {
             with_controller(|c| c.new_collection(c.current_game_id()));
         });
+        ui.on_toggle_status(|index, on| {
+            if let Ok(index) = usize::try_from(index) {
+                with_controller(|c| c.toggle_status(index, on));
+            }
+        });
+        ui.on_choose_game_version(|index| {
+            if let Ok(index) = usize::try_from(index) {
+                with_controller(|c| c.choose_version(index));
+            }
+        });
+        ui.on_choose_game_file(|index| {
+            if let Ok(index) = usize::try_from(index) {
+                with_controller(|c| c.choose_file(index));
+            }
+        });
         ui.on_dialog_accepted(|value| with_controller(|c| c.dialog_accepted(value.to_string())));
         ui.on_dialog_cancelled(|| with_controller(|c| c.close_dialog()));
         ui.on_search_edited(|text| with_controller(|c| c.set_search(text.to_string())));
@@ -384,6 +414,7 @@ impl Controller {
         ui.on_columns_changed(|n| with_controller(|c| c.set_columns(n)));
         ui.on_row_shown(|i| with_controller(|c| c.row_shown(i.max(0) as usize)));
         ui.on_refresh(|| with_controller(|c| c.sync()));
+        ui.on_surprise_me(|| with_controller(|c| c.surprise()));
         ui.on_open_game(|id| with_controller(|c| c.open_game(i64::from(id))));
         ui.on_back_to_library(|| with_controller(|c| c.back_to_library()));
         crate::mouse::on_back_button(|id| with_controller(|c| c.mouse_back(id)));
@@ -618,6 +649,7 @@ impl Controller {
         if let Some(id) = restore.and_then(|v| v.game) {
             self.open_game(id);
         }
+        self.show_whats_new_if_due();
         self.sync();
         self.shared.rt.spawn(async move {
             let me = client.me().await;
@@ -636,6 +668,11 @@ impl Controller {
         if let Some(placement) = Placement::update(previous, &observed) {
             store.set(WINDOW_KEY, &placement.to_json());
         }
+        let sidebar = Sidebar {
+            width: ui.get_sidebar_width(),
+            collapsed: ui.get_sidebar_collapsed(),
+        };
+        store.set(SIDEBAR_KEY, &sidebar.to_json());
         if self.client.borrow().is_some() {
             let view = LastView {
                 selected: self.selected.borrow().clone(),
@@ -954,6 +991,7 @@ impl Controller {
                         downloaded: g.downloaded,
                         focused: focus == Some(start + j),
                         favorite: g.favorite,
+                        versions: g.versions as i32,
                         aspect: crate::details::box_aspect(&g.platform_slug),
                     })
                     .collect();
@@ -1100,6 +1138,7 @@ impl Controller {
         *self.sync_cancel.borrow_mut() = cancel.clone();
         let store = self.shared.store.clone();
         let collections = self.has_scope("collections.read");
+        let statuses = self.has_scope("roms.user.read");
         self.shared.rt.spawn(async move {
             let result = sync_library(&client, &store, PAGE_SIZE, &cancel).await;
             if result.is_ok() && collections && !cancel.load(Ordering::SeqCst) {
@@ -1111,6 +1150,13 @@ impl Controller {
                 if let Err(e) = crate::sync::sync_played(&client, &store, PAGE_SIZE, &cancel).await
                 {
                     tracing::warn!("syncing recently played games: {e}");
+                }
+            }
+            if result.is_ok() && statuses && !cancel.load(Ordering::SeqCst) {
+                if let Err(e) =
+                    crate::sync::sync_statuses(&client, &store, PAGE_SIZE, &cancel).await
+                {
+                    tracing::warn!("syncing play statuses: {e}");
                 }
             }
             on_ui(move |c| c.sync_finished(generation, result));
@@ -1146,6 +1192,9 @@ impl Controller {
         }
         self.reload_sidebar();
         self.reload_games();
+        if let Some(id) = self.current_game_id() {
+            self.refresh_status_controls(id);
+        }
     }
 }
 

@@ -84,6 +84,9 @@ pub const RETRO_ENVIRONMENT_SET_MEMORY_MAPS: c_uint = 36 | 0x10000;
 pub const RETRO_ENVIRONMENT_SET_SUPPORT_ACHIEVEMENTS: c_uint = 42 | 0x10000;
 pub const RETRO_ENVIRONMENT_SET_HW_RENDER: c_uint = 14;
 pub const RETRO_ENVIRONMENT_GET_LOG_INTERFACE: c_uint = 27;
+pub const RETRO_ENVIRONMENT_GET_RUMBLE_INTERFACE: c_uint = 23;
+pub const RETRO_RUMBLE_STRONG: c_uint = 0;
+pub const RETRO_RUMBLE_WEAK: c_uint = 1;
 pub const RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY: c_uint = 31;
 pub const RETRO_ENVIRONMENT_SET_SYSTEM_AV_INFO: c_uint = 32;
 pub const RETRO_ENVIRONMENT_SET_GEOMETRY: c_uint = 37;
@@ -94,6 +97,7 @@ pub const RETRO_ENVIRONMENT_GET_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE_SUPPORT:
 pub const RETRO_ENVIRONMENT_GET_FASTFORWARDING: c_uint = 49 | 0x10000;
 pub const RETRO_ENVIRONMENT_GET_CORE_OPTIONS_VERSION: c_uint = 52;
 pub const RETRO_ENVIRONMENT_SET_CORE_OPTIONS: c_uint = 53;
+pub const RETRO_ENVIRONMENT_SET_CORE_OPTIONS_INTL: c_uint = 54;
 pub const RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2: c_uint = 67;
 pub const RETRO_ENVIRONMENT_SET_CORE_OPTIONS_V2_INTL: c_uint = 68;
 pub const RETRO_ENVIRONMENT_SET_DISK_CONTROL_INTERFACE: c_uint = 13;
@@ -286,6 +290,12 @@ pub struct retro_core_option_definition {
 }
 
 #[repr(C)]
+pub struct retro_core_options_intl {
+    pub us: *const retro_core_option_definition,
+    pub local: *const retro_core_option_definition,
+}
+
+#[repr(C)]
 pub struct retro_core_option_v2_definition {
     pub key: *const c_char,
     pub desc: *const c_char,
@@ -348,6 +358,14 @@ pub struct retro_microphone_interface {
     pub set_mic_state: Option<retro_set_mic_state_t>,
     pub get_mic_state: Option<retro_get_mic_state_t>,
     pub read_mic: Option<retro_read_mic_t>,
+}
+
+pub type retro_set_rumble_state_t =
+    unsafe extern "C" fn(port: c_uint, effect: c_uint, strength: u16) -> bool;
+
+#[repr(C)]
+pub struct retro_rumble_interface {
+    pub set_rumble_state: Option<retro_set_rumble_state_t>,
 }
 
 pub type retro_environment_t = unsafe extern "C" fn(cmd: c_uint, data: *mut c_void) -> bool;

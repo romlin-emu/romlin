@@ -141,6 +141,22 @@ async fn fetch_pages(
     }
 }
 
+/// A failed or empty answer keeps the picks already here: the sync is still good without them.
+async fn refresh_picks(
+    client: &Client,
+    store: &Mutex<Store>,
+    cancel: &AtomicBool,
+) -> Result<(), Error> {
+    match client.picked_rom_ids().await {
+        Ok(picks) if !picks.is_empty() => write(store, cancel, |s| s.set_picks(&picks)),
+        Ok(_) => Ok(()),
+        Err(e) => {
+            tracing::warn!("could not fetch RomM's version picks: {e}");
+            Ok(())
+        }
+    }
+}
+
 pub async fn sync_library(
     client: &Client,
     store: &Mutex<Store>,
@@ -169,6 +185,8 @@ pub async fn sync_library(
         let full = fetch_pages(client, store, page_size, None, cancel, &mut report).await?;
         newest = newest.max(full);
     }
+
+    refresh_picks(client, store, cancel).await?;
 
     if let Some(cursor) = started.map(cursor_from).or(newest) {
         write(store, cancel, |s| s.set("last_sync_at", &cursor))?;
@@ -199,6 +217,29 @@ pub async fn sync_played(
             return Ok(merged);
         }
     }
+}
+
+/// Replaces the play statuses here with RomM's, once every page has come in, so a sync that
+/// fails partway leaves them as they were.
+pub async fn sync_statuses(
+    client: &Client,
+    store: &Mutex<Store>,
+    page_size: i64,
+    cancel: &AtomicBool,
+) -> Result<usize, Error> {
+    let mut offset = 0;
+    let mut statuses = Vec::new();
+    loop {
+        let page = client.status_roms(offset, page_size).await?;
+        let count = page.items.len();
+        statuses.extend(page.items.iter().map(|r| (r.id, r.play_status())));
+        offset += count as i64;
+        if (count as i64) < page_size {
+            break;
+        }
+    }
+    write(store, cancel, |s| s.replace_play_statuses(&statuses))?;
+    Ok(statuses.len())
 }
 
 #[cfg(test)]
@@ -375,6 +416,168 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn play_statuses_from_the_server_replace_the_ones_here() {
+        use crate::romm::types::{PlayStatus, Progress};
+        let server = MockServer::start().await;
+        let marked = |id: i64, user: Value| {
+            let mut rom = rom_json(id, "t");
+            rom["rom_user"] = user;
+            rom
+        };
+        Mock::given(method("GET"))
+            .and(path("/api/roms"))
+            .and(query_param("statuses", "now_playing"))
+            .and(query_param("offset", "0"))
+            .respond_with(page(vec![
+                marked(1, json!({"now_playing": true})),
+                marked(2, json!({"status": "finished"})),
+            ]))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/roms"))
+            .and(query_param("statuses", "now_playing"))
+            .and(query_param("offset", "2"))
+            .respond_with(page(vec![]))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let store = store();
+        {
+            let mut s = store.lock().unwrap();
+            s.upsert_games(&[
+                rom(1, 1, "A", "x"),
+                rom(2, 1, "B", "x"),
+                rom(3, 1, "C", "x"),
+            ]);
+            s.set_play_status(
+                3,
+                PlayStatus {
+                    backlogged: true,
+                    ..PlayStatus::default()
+                },
+            );
+        }
+        sync_statuses(&client(&server), &store, 2, &go())
+            .await
+            .unwrap();
+        let s = store.lock().unwrap();
+        assert!(s.play_status(1).now_playing);
+        assert_eq!(s.play_status(2).progress, Some(Progress::Finished));
+        assert_eq!(s.play_status(3), PlayStatus::default());
+    }
+
+    #[tokio::test]
+    async fn play_statuses_stay_when_the_server_fails_partway() {
+        use crate::romm::types::PlayStatus;
+        let server = MockServer::start().await;
+        let mut first = rom_json(1, "t");
+        first["rom_user"] = json!({"now_playing": true});
+        Mock::given(method("GET"))
+            .and(path("/api/roms"))
+            .and(query_param("offset", "0"))
+            .respond_with(page(vec![first, rom_json(2, "t")]))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/api/roms"))
+            .and(query_param("offset", "2"))
+            .respond_with(ResponseTemplate::new(500))
+            .mount(&server)
+            .await;
+        let store = store();
+        let backlog = PlayStatus {
+            backlogged: true,
+            ..PlayStatus::default()
+        };
+        {
+            let mut s = store.lock().unwrap();
+            s.upsert_games(&[rom(1, 1, "A", "x"), rom(3, 1, "C", "x")]);
+            s.set_play_status(3, backlog);
+        }
+        assert!(sync_statuses(&client(&server), &store, 2, &go())
+            .await
+            .is_err());
+        let s = store.lock().unwrap();
+        assert_eq!(s.play_status(3), backlog);
+        assert_eq!(s.play_status(1), PlayStatus::default());
+    }
+
+    fn with_sibling(mut rom: Value, sibling: i64) -> Value {
+        rom["sibling_roms"] = json!([{"id": sibling, "name": format!("Game {sibling}"),
+            "fs_name_no_tags": format!("g{sibling}"), "fs_name_no_ext": format!("g{sibling}"),
+            "is_main_sibling": false}]);
+        rom
+    }
+
+    fn with_match(mut rom: Value) -> Value {
+        rom["igdb_id"] = json!(7);
+        rom
+    }
+
+    async fn mount_picks(server: &MockServer, body: Value) {
+        Mock::given(method("GET"))
+            .and(path("/api/roms"))
+            .and(query_param("group_by_meta_id", "true"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(server)
+            .await;
+    }
+
+    async fn grouped_server() -> MockServer {
+        let server = server_with(
+            json!([{"id": 1, "slug": "snes", "display_name": "SNES", "rom_count": 2}]),
+            json!([1, 2]),
+        )
+        .await;
+        mount_picks(&server, json!({"items": [], "rom_id_index": [2]})).await;
+        Mock::given(method("GET"))
+            .and(path("/api/roms"))
+            .respond_with(page(vec![
+                with_match(rom_json(1, "2026-01-01T00:00:00+00:00")),
+                with_match(with_sibling(rom_json(2, "2026-01-02T00:00:00+00:00"), 1)),
+            ]))
+            .mount(&server)
+            .await;
+        server
+    }
+
+    #[tokio::test]
+    async fn picks_come_down_with_the_sync() {
+        let server = grouped_server().await;
+        let store = store();
+        sync_library(&client(&server), &store, 500, &go())
+            .await
+            .unwrap();
+        assert_eq!(ids(&store), [2]);
+    }
+
+    #[tokio::test]
+    async fn picks_are_kept_when_the_index_is_missing() {
+        let server = grouped_server().await;
+        let store = store();
+        sync_library(&client(&server), &store, 500, &go())
+            .await
+            .unwrap();
+        let second = server_with(
+            json!([{"id": 1, "slug": "snes", "display_name": "SNES", "rom_count": 2}]),
+            json!([1, 2]),
+        )
+        .await;
+        mount_picks(&second, json!({"items": []})).await;
+        Mock::given(method("GET"))
+            .and(path("/api/roms"))
+            .respond_with(page(vec![]))
+            .mount(&second)
+            .await;
+        sync_library(&client(&second), &store, 500, &go())
+            .await
+            .unwrap();
+        assert_eq!(ids(&store), [2]);
+    }
+
+    #[tokio::test]
     async fn second_sync_asks_for_changes_and_drops_deleted_games() {
         let server = server_with(
             json!([{"id": 1, "slug": "snes", "display_name": "SNES", "rom_count": 2}]),
@@ -533,6 +736,7 @@ mod tests {
     #[tokio::test]
     async fn games_missing_after_incremental_sync_trigger_a_full_pass() {
         let server = server_with(json!([]), json!([1, 2])).await;
+        mount_picks(&server, json!({"items": []})).await;
         Mock::given(method("GET"))
             .and(path("/api/roms"))
             .and(query_param("updated_after", "2026-01-03T00:00:00+00:00"))

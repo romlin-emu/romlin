@@ -193,12 +193,116 @@ pub struct Rom {
     pub created_at: Option<String>,
     #[serde(default)]
     pub rom_user: Option<RomUser>,
+    #[serde(default)]
+    pub sibling_roms: Vec<SiblingRom>,
+    #[serde(flatten)]
+    pub match_ids: MatchIds,
+}
+
+/// The ids metadata providers know a ROM's game by, which RomM groups versions with.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+pub struct MatchIds {
+    #[serde(default)]
+    pub igdb_id: Option<i64>,
+    #[serde(default)]
+    pub ss_id: Option<i64>,
+    #[serde(default)]
+    pub moby_id: Option<i64>,
+    #[serde(default)]
+    pub ra_id: Option<i64>,
+    #[serde(default)]
+    pub hasheous_id: Option<i64>,
+    #[serde(default)]
+    pub launchbox_id: Option<i64>,
+    #[serde(default)]
+    pub tgdb_id: Option<i64>,
+    #[serde(default)]
+    pub flashpoint_id: Option<String>,
+    #[serde(default)]
+    pub steam_id: Option<i64>,
+}
+
+impl MatchIds {
+    /// The card RomM's grouped gallery puts the ROM on: the first id it has, in RomM's order, on
+    /// its platform, or the ROM alone when it has none.
+    pub fn card(&self, platform_id: i64, rom_id: i64) -> String {
+        let numbers = [
+            ("igdb", self.igdb_id),
+            ("ss", self.ss_id),
+            ("moby", self.moby_id),
+            ("ra", self.ra_id),
+            ("hasheous", self.hasheous_id),
+            ("launchbox", self.launchbox_id),
+            ("tgdb", self.tgdb_id),
+        ];
+        let first = numbers
+            .into_iter()
+            .find_map(|(source, id)| Some((source, id?.to_string())))
+            .or_else(|| Some(("flashpoint", self.flashpoint_id.clone()?)))
+            .or_else(|| Some(("steam", self.steam_id?.to_string())))
+            .unwrap_or(("romm", rom_id.to_string()));
+        format!("{}-{platform_id}-{}", first.0, first.1)
+    }
+}
+
+/// Another version of the same game, as RomM lists it on a ROM.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+pub struct SiblingRom {
+    pub id: i64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Deserialize)]
 pub struct RomUser {
     #[serde(default)]
     pub last_played: Option<String>,
+    #[serde(default)]
+    pub now_playing: bool,
+    #[serde(default)]
+    pub backlogged: bool,
+    #[serde(default)]
+    pub status: Option<String>,
+}
+
+/// How far the user got with a game, as RomM names it. At most one is set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Progress {
+    Incomplete,
+    Finished,
+    Completed100,
+    Retired,
+    NeverPlaying,
+}
+
+impl Progress {
+    pub const ALL: [Self; 5] = [
+        Self::Incomplete,
+        Self::Finished,
+        Self::Completed100,
+        Self::Retired,
+        Self::NeverPlaying,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Incomplete => "incomplete",
+            Self::Finished => "finished",
+            Self::Completed100 => "completed_100",
+            Self::Retired => "retired",
+            Self::NeverPlaying => "never_playing",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|p| p.as_str() == s)
+    }
+}
+
+/// The user's own marks on a game in RomM: playing it now, saving it for later, and how far they got.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PlayStatus {
+    pub now_playing: bool,
+    pub backlogged: bool,
+    pub progress: Option<Progress>,
 }
 
 impl Rom {
@@ -208,6 +312,16 @@ impl Rom {
 
     pub fn last_played(&self) -> Option<i64> {
         crate::sync::parse_iso(self.rom_user.as_ref()?.last_played.as_deref()?)
+    }
+
+    pub fn play_status(&self) -> PlayStatus {
+        self.rom_user
+            .as_ref()
+            .map_or_else(PlayStatus::default, |u| PlayStatus {
+                now_playing: u.now_playing,
+                backlogged: u.backlogged,
+                progress: u.status.as_deref().and_then(Progress::parse),
+            })
     }
 
     pub fn title(&self) -> &str {
@@ -233,6 +347,9 @@ pub struct RomFile {
     pub file_path: String,
     pub file_size_bytes: i64,
     pub sha1_hash: Option<String>,
+    /// What RomM filed the file as inside a game's folder: "hack", "manual", "patch"…
+    #[serde(default)]
+    pub category: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -326,12 +443,44 @@ pub(crate) fn rom(id: i64, platform_id: i64, name: &str, updated_at: &str) -> Ro
         merged_screenshots: Vec::new(),
         created_at: None,
         rom_user: None,
+        sibling_roms: Vec::new(),
+        match_ids: MatchIds::default(),
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_card_is_the_first_match_in_romms_order() {
+        let ids = MatchIds {
+            ss_id: Some(4),
+            ra_id: Some(9),
+            ..MatchIds::default()
+        };
+        assert_eq!(ids.card(2, 100), "ss-2-4");
+        let ids = MatchIds {
+            igdb_id: Some(1),
+            ..ids
+        };
+        assert_eq!(ids.card(2, 100), "igdb-2-1");
+    }
+
+    #[test]
+    fn flashpoint_comes_before_steam() {
+        let ids = MatchIds {
+            flashpoint_id: Some("f".into()),
+            steam_id: Some(3),
+            ..MatchIds::default()
+        };
+        assert_eq!(ids.card(1, 7), "flashpoint-1-f");
+    }
+
+    #[test]
+    fn an_unmatched_rom_is_its_own_card() {
+        assert_eq!(MatchIds::default().card(1, 7), "romm-1-7");
+    }
 
     #[test]
     fn rom_metadata_and_screenshots_parse() {
@@ -378,6 +527,51 @@ mod tests {
         .unwrap();
         assert_eq!(bare.added_at(), None);
         assert_eq!(bare.last_played(), None);
+    }
+
+    #[test]
+    fn rom_carries_its_play_status() {
+        let rom: Rom = serde_json::from_value(serde_json::json!({
+            "id": 1, "platform_id": 2, "name": "A", "fs_name": "a.md", "summary": null,
+            "updated_at": "t", "path_cover_small": null, "path_cover_large": null,
+            "fs_size_bytes": 5,
+            "rom_user": {"now_playing": true, "backlogged": false, "status": "completed_100"}
+        }))
+        .unwrap();
+        assert_eq!(
+            rom.play_status(),
+            PlayStatus {
+                now_playing: true,
+                backlogged: false,
+                progress: Some(Progress::Completed100)
+            }
+        );
+    }
+
+    #[test]
+    fn an_unknown_play_status_reads_as_none() {
+        let rom: Rom = serde_json::from_value(serde_json::json!({
+            "id": 1, "platform_id": 2, "name": "A", "fs_name": "a.md", "summary": null,
+            "updated_at": "t", "path_cover_small": null, "path_cover_large": null,
+            "fs_size_bytes": 5, "rom_user": {"backlogged": true, "status": "speedrunning"}
+        }))
+        .unwrap();
+        assert_eq!(
+            rom.play_status(),
+            PlayStatus {
+                backlogged: true,
+                ..PlayStatus::default()
+            }
+        );
+    }
+
+    #[test]
+    fn progress_names_round_trip_as_romm_spells_them() {
+        for p in Progress::ALL {
+            assert_eq!(Progress::parse(p.as_str()), Some(p));
+        }
+        assert_eq!(Progress::Completed100.as_str(), "completed_100");
+        assert_eq!(Progress::NeverPlaying.as_str(), "never_playing");
     }
 
     #[test]

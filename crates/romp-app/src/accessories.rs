@@ -99,6 +99,7 @@ mod tests {
             cover_small: None,
             cover_large: None,
             local_path: None,
+            version_file: None,
             meta: crate::romm::types::RomMetadata {
                 franchises: franchises.iter().map(ToString::to_string).collect(),
                 ..Default::default()

@@ -2,7 +2,8 @@ mod collections;
 
 pub use collections::{CollectionItem, CollectionKind, CollectionRecord};
 
-use crate::romm::types::{Platform, Rom, RomMetadata};
+use crate::romm::types::{Platform, PlayStatus, Progress, Rom, RomMetadata};
+use crate::versions;
 use rusqlite::{params, Connection};
 use std::path::Path;
 
@@ -25,6 +26,14 @@ pub struct GameItem {
     pub cover: Option<String>,
     pub downloaded: bool,
     pub favorite: bool,
+    /// How many ROMs are versions of this game, itself included.
+    pub versions: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Version {
+    pub id: i64,
+    pub label: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -50,6 +59,8 @@ pub struct GameDetail {
     pub local_path: Option<String>,
     pub meta: RomMetadata,
     pub screenshots: Vec<String>,
+    /// The file name, when the game has other versions to tell it from.
+    pub version_file: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,6 +85,8 @@ pub enum Scope {
     Collection(String),
     Recent,
     ForYou,
+    NowPlaying,
+    Backlog,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -111,6 +124,14 @@ pub struct Store {
     conn: Connection,
 }
 
+/// Whether any version of `g`'s game is downloaded, for counts under "downloaded only".
+/// How many entries each group puts in the game list: every RomM pick, or one row when it has
+/// none; under "downloaded only" (`?1`), one when any version is downloaded.
+const SHOWN: &str = "shown AS (
+   SELECT card,
+          CASE WHEN ?1 THEN MAX(local_path IS NOT NULL) ELSE MAX(SUM(picked), 1) END AS entries
+   FROM games GROUP BY card)";
+
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS platforms (id INTEGER PRIMARY KEY, slug TEXT NOT NULL, name TEXT NOT NULL);
@@ -126,6 +147,32 @@ CREATE TABLE IF NOT EXISTS games (
 );
 CREATE INDEX IF NOT EXISTS games_platform ON games(platform_id);
 ";
+
+fn write_play_status(conn: &Connection, id: i64, status: PlayStatus) {
+    conn.execute(
+        "UPDATE games SET now_playing = ?2, backlogged = ?3, progress = ?4 WHERE id = ?1",
+        params![
+            id,
+            status.now_playing,
+            status.backlogged,
+            status.progress.map(Progress::as_str)
+        ],
+    )
+    .expect("write play status");
+}
+
+/// The ROMs RomM lists as versions of the ROM `id` names, which RomP has. RomM works them out
+/// live, but a ROM's `updated_at` doesn't move when another ROM becomes or stops being its
+/// version, so of the two lists that could name the pair, the more recently updated one decides.
+fn versions_of(id: &str) -> String {
+    format!(
+        "SELECT s.sibling_id FROM siblings s JOIN games o ON o.id = s.sibling_id
+           WHERE s.rom_id = {id} AND o.updated_at <= (SELECT updated_at FROM games WHERE id = {id})
+         UNION
+         SELECT s.rom_id FROM siblings s JOIN games o ON o.id = s.rom_id
+           WHERE s.sibling_id = {id} AND o.updated_at >= (SELECT updated_at FROM games WHERE id = {id})"
+    )
+}
 
 fn json_column<T: serde::de::DeserializeOwned + Default>(text: Option<String>) -> T {
     text.and_then(|t| serde_json::from_str(&t).ok())
@@ -255,6 +302,67 @@ impl Store {
                  COMMIT;",
             )?;
         }
+        if version < 12 {
+            conn.execute_batch(
+                "BEGIN;
+                 ALTER TABLE games ADD COLUMN now_playing INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE games ADD COLUMN backlogged INTEGER NOT NULL DEFAULT 0;
+                 ALTER TABLE games ADD COLUMN progress TEXT;
+                 PRAGMA user_version = 12;
+                 COMMIT;",
+            )?;
+        }
+        if version < 13 {
+            conn.execute_batch(
+                "BEGIN;
+                 ALTER TABLE games ADD COLUMN group_id INTEGER;
+                 ALTER TABLE games ADD COLUMN fs_name TEXT;
+                 ALTER TABLE games ADD COLUMN picked INTEGER NOT NULL DEFAULT 0;
+                 UPDATE games SET group_id = id;
+                 CREATE INDEX games_group ON games(group_id);
+                 DELETE FROM kv WHERE key = 'last_sync_at';
+                 PRAGMA user_version = 13;
+                 COMMIT;",
+            )?;
+        }
+        if version < 14 {
+            conn.execute_batch(
+                "BEGIN;
+                 CREATE TABLE IF NOT EXISTS siblings (rom_id INTEGER NOT NULL, sibling_id INTEGER NOT NULL,
+                                        PRIMARY KEY (rom_id, sibling_id));
+                 DELETE FROM kv WHERE key = 'last_sync_at';
+                 PRAGMA user_version = 14;
+                 COMMIT;",
+            )?;
+        }
+        if version < 15 {
+            conn.execute_batch(
+                "BEGIN;
+                 ALTER TABLE games ADD COLUMN card TEXT;
+                 UPDATE games SET card = 'romm-' || platform_id || '-' || id;
+                 CREATE INDEX games_card ON games(card);
+                 CREATE INDEX IF NOT EXISTS siblings_reverse ON siblings(sibling_id);
+                 DROP INDEX games_group;
+                 ALTER TABLE games DROP COLUMN group_id;
+                 DELETE FROM kv WHERE key IN ('last_sync_at', 'versions_repaired');
+                 PRAGMA user_version = 15;
+                 COMMIT;",
+            )?;
+        }
+        if version < 16 {
+            conn.execute_batch(
+                "BEGIN;
+                 CREATE TABLE in_game_save_sync_new (rom_id INTEGER NOT NULL,
+                   variant TEXT NOT NULL DEFAULT '', md5 TEXT NOT NULL, synced_at INTEGER NOT NULL,
+                   PRIMARY KEY (rom_id, variant));
+                 INSERT INTO in_game_save_sync_new (rom_id, md5, synced_at)
+                   SELECT rom_id, md5, synced_at FROM in_game_save_sync;
+                 DROP TABLE in_game_save_sync;
+                 ALTER TABLE in_game_save_sync_new RENAME TO in_game_save_sync;
+                 PRAGMA user_version = 16;
+                 COMMIT;",
+            )?;
+        }
         Ok(Self { conn })
     }
 
@@ -278,6 +386,43 @@ impl Store {
         self.conn
             .execute("DELETE FROM kv WHERE key = ?1", [key])
             .expect("delete kv");
+    }
+
+    /// The files a multi-file game can start with, the one RomP starts by itself first; empty
+    /// when it has no choice.
+    pub fn file_choices(&self, id: i64) -> Vec<String> {
+        json_column(self.get(&format!("file_choices:{id}")))
+    }
+
+    /// Whether the files a game can start with were ever looked up.
+    pub fn knows_file_choices(&self, id: i64) -> bool {
+        self.get(&format!("file_choices:{id}")).is_some()
+    }
+
+    pub fn set_file_choices(&self, id: i64, files: &[String]) {
+        let files = if files.len() < 2 { &[] } else { files };
+        self.set(
+            &format!("file_choices:{id}"),
+            &serde_json::to_string(files).expect("file list"),
+        );
+    }
+
+    /// The file the player chose to start a game with, when it isn't the one RomP would.
+    pub fn chosen_file(&self, id: i64) -> Option<String> {
+        let chosen = self.get(&format!("chosen_file:{id}"))?;
+        let choices = self.file_choices(id);
+        choices[1.min(choices.len())..]
+            .contains(&chosen)
+            .then_some(chosen)
+    }
+
+    pub fn choose_file(&self, id: i64, file: &str) {
+        let key = format!("chosen_file:{id}");
+        if self.file_choices(id).first().is_some_and(|f| f == file) {
+            self.remove(&key);
+        } else {
+            self.set(&key, file);
+        }
     }
 
     pub fn replace_platforms(&mut self, platforms: &[Platform]) {
@@ -304,17 +449,19 @@ impl Store {
     pub fn upsert_games(&mut self, roms: &[Rom]) {
         let tx = self.conn.transaction().expect("tx");
         for r in roms {
+            let fs_name = (!r.sibling_roms.is_empty()).then_some(r.fs_name.as_str());
             tx.execute(
                 "INSERT INTO games
                  (id, platform_id, title, summary, updated_at, cover_small, cover_large, size_bytes,
-                  meta, screenshots, added_at, last_played)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                  meta, screenshots, added_at, last_played, card, fs_name)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
                  ON CONFLICT(id) DO UPDATE SET
                    platform_id = excluded.platform_id, title = excluded.title,
                    summary = excluded.summary, updated_at = excluded.updated_at,
                    cover_small = excluded.cover_small, cover_large = excluded.cover_large,
                    size_bytes = excluded.size_bytes, meta = excluded.meta,
                    screenshots = excluded.screenshots, added_at = excluded.added_at,
+                   card = excluded.card, fs_name = excluded.fs_name,
                    last_played = NULLIF(MAX(COALESCE(last_played, 0),
                                             COALESCE(excluded.last_played, 0)), 0)",
                 params![
@@ -331,12 +478,58 @@ impl Store {
                         .and_then(|m| serde_json::to_string(m).ok()),
                     serde_json::to_string(&r.merged_screenshots).ok(),
                     r.added_at(),
-                    r.last_played()
+                    r.last_played(),
+                    r.match_ids.card(r.platform_id, r.id),
+                    fs_name
                 ],
             )
             .expect("upsert game");
+            tx.execute("DELETE FROM siblings WHERE rom_id = ?1", [r.id])
+                .expect("clear siblings");
+            for sibling in &r.sibling_roms {
+                tx.execute(
+                    "INSERT OR IGNORE INTO siblings (rom_id, sibling_id) VALUES (?1, ?2)",
+                    [r.id, sibling.id],
+                )
+                .expect("add sibling");
+            }
         }
         tx.commit().expect("commit");
+    }
+
+    pub fn set_picks(&mut self, ids: &[i64]) {
+        let tx = self.conn.transaction().expect("tx");
+        tx.execute(
+            "CREATE TEMP TABLE IF NOT EXISTS keep (id INTEGER PRIMARY KEY)",
+            [],
+        )
+        .expect("temp table");
+        tx.execute("DELETE FROM keep", []).expect("clear keep");
+        for id in ids {
+            tx.execute("INSERT OR IGNORE INTO keep (id) VALUES (?1)", [id])
+                .expect("keep id");
+        }
+        tx.execute("UPDATE games SET picked = id IN (SELECT id FROM keep)", [])
+            .expect("set picks");
+        tx.commit().expect("commit");
+    }
+
+    pub fn set_picked(&mut self, id: i64) {
+        let tx = self.conn.transaction().expect("tx");
+        tx.execute(
+            "UPDATE games SET picked = (id = ?1)
+             WHERE card = (SELECT card FROM games WHERE id = ?1)",
+            [id],
+        )
+        .expect("set picked");
+        tx.commit().expect("commit");
+    }
+
+    /// Puts `prev` back as the pick when `failed` still is, so a pick made since stays.
+    pub fn undo_pick(&mut self, failed: i64, prev: i64) {
+        if self.group_pick(failed) == Some(failed) {
+            self.set_picked(prev);
+        }
     }
 
     pub fn retain_games(&mut self, ids: &[i64]) -> usize {
@@ -357,6 +550,11 @@ impl Store {
                 [],
             )
             .expect("retain");
+        tx.execute(
+            "DELETE FROM siblings WHERE rom_id NOT IN (SELECT id FROM games)",
+            [],
+        )
+        .expect("retain siblings");
         tx.commit().expect("commit");
         removed
     }
@@ -364,12 +562,13 @@ impl Store {
     pub fn platforms(&self, downloaded_only: bool) -> Vec<PlatformItem> {
         let mut stmt = self
             .conn
-            .prepare(
-                "SELECT p.id, p.slug, p.name, COUNT(g.id), p.aliases FROM platforms p
-                 JOIN games g ON g.platform_id = p.id
-                 WHERE ?1 = 0 OR g.local_path IS NOT NULL
-                 GROUP BY p.id ORDER BY p.name COLLATE NOCASE",
-            )
+            .prepare(&format!(
+                "WITH {SHOWN}
+                 SELECT p.id, p.slug, p.name, SUM(s.entries), p.aliases FROM platforms p
+                 JOIN (SELECT DISTINCT platform_id, card FROM games) g ON g.platform_id = p.id
+                 JOIN shown s ON s.card = g.card
+                 GROUP BY p.id HAVING SUM(s.entries) > 0 ORDER BY p.name COLLATE NOCASE",
+            ))
             .expect("prepare");
         stmt.query_map([downloaded_only], |r| {
             Ok(PlatformItem {
@@ -401,37 +600,69 @@ impl Store {
             filter.sort
         };
         let order = match sort {
-            _ if filter.scope == Scope::ForYou => "r.rank",
+            _ if filter.scope == Scope::ForYou => "g.group_rank",
             SortOrder::Name => "g.title COLLATE NOCASE, g.id",
-            SortOrder::Added => "g.added_at IS NULL, g.added_at DESC, g.title COLLATE NOCASE, g.id",
+            SortOrder::Added => {
+                "g.group_added IS NULL, g.group_added DESC, g.title COLLATE NOCASE, g.id"
+            }
             SortOrder::LastPlayed => {
-                "g.last_played IS NULL, g.last_played DESC, g.title COLLATE NOCASE, g.id"
+                "g.group_played IS NULL, g.group_played DESC, g.title COLLATE NOCASE, g.id"
             }
         };
+        let linked = versions_of("g.id");
         let mut stmt = self
             .conn
             .prepare(&format!(
-                "SELECT g.id, g.title, COALESCE(p.name, ''), g.cover_small, g.local_path IS NOT NULL,
-                        EXISTS (SELECT 1 FROM collection_roms m JOIN collections c ON c.key = m.key
-                                WHERE m.rom_id = g.id AND c.kind = 0),
-                        COALESCE(p.slug, '')
-                 FROM games g LEFT JOIN platforms p ON p.id = g.platform_id
-                   LEFT JOIN recommendations r ON r.rom_id = g.id
-                 WHERE (?1 IS NULL OR g.platform_id = ?1) AND g.title LIKE ?2 ESCAPE '\\'
+                "WITH members AS (
+                   SELECT DISTINCT g.card FROM games g
+                     LEFT JOIN recommendations r ON r.rom_id = g.id
+                   WHERE (?1 IS NULL OR g.platform_id = ?1)
+                     AND (g.title LIKE ?2 ESCAPE '\\' OR g.fs_name LIKE ?2 ESCAPE '\\')
+                     AND (?4 IS NULL OR g.id IN (SELECT rom_id FROM collection_roms WHERE key = ?4))
+                     AND (?5 = 0 OR g.last_played IS NOT NULL)
+                     AND (?6 = 0 OR r.rom_id IS NOT NULL)
+                     AND (?7 = 0 OR g.now_playing = 1)
+                     AND (?8 = 0 OR g.backlogged = 1)
+                 ),
+                 favorites AS (
+                   SELECT DISTINCT m.rom_id FROM collection_roms m
+                     JOIN collections c ON c.key = m.key
+                   WHERE c.kind = 0
+                 ),
+                 ranked AS (
+                   SELECT g.*,
+                          ROW_NUMBER() OVER (PARTITION BY g.card
+                            ORDER BY (?3 AND g.local_path IS NULL), g.picked DESC,
+                                     g.last_played IS NULL, g.last_played DESC, g.id) AS n,
+                          MAX(g.last_played) OVER grp AS group_played,
+                          MIN(g.added_at) OVER grp AS group_added,
+                          MIN(r.rank) OVER grp AS group_rank,
+                          MAX(f.rom_id IS NOT NULL) OVER grp AS group_favorite
+                   FROM games g LEFT JOIN recommendations r ON r.rom_id = g.id
+                     LEFT JOIN favorites f ON f.rom_id = g.id
+                   WHERE g.card IN (SELECT card FROM members)
+                   WINDOW grp AS (PARTITION BY g.card)
+                 )
+                 SELECT g.id, g.title, COALESCE(p.name, ''), g.cover_small, g.local_path IS NOT NULL,
+                        g.group_favorite, COALESCE(p.slug, ''),
+                        1 + (SELECT COUNT(*) FROM ({linked}))
+                 FROM ranked g LEFT JOIN platforms p ON p.id = g.platform_id
+                 WHERE (g.n = 1 OR (?3 = 0 AND g.picked = 1))
                    AND (?3 = 0 OR g.local_path IS NOT NULL)
-                   AND (?4 IS NULL OR g.id IN (SELECT rom_id FROM collection_roms WHERE key = ?4))
-                   AND (?5 = 0 OR g.last_played IS NOT NULL)
-                   AND (?6 = 0 OR r.rom_id IS NOT NULL)
                  ORDER BY {order}",
             ))
             .expect("prepare");
         let (platform, collection) = match &filter.scope {
-            Scope::All | Scope::Recent | Scope::ForYou => (None, None),
+            Scope::All | Scope::Recent | Scope::ForYou | Scope::NowPlaying | Scope::Backlog => {
+                (None, None)
+            }
             Scope::Platform(id) => (Some(*id), None),
             Scope::Collection(key) => (None, Some(key.as_str())),
         };
         let recent = filter.scope == Scope::Recent;
         let for_you = filter.scope == Scope::ForYou;
+        let now_playing = filter.scope == Scope::NowPlaying;
+        let backlog = filter.scope == Scope::Backlog;
         stmt.query_map(
             params![
                 platform,
@@ -439,7 +670,9 @@ impl Store {
                 filter.downloaded_only,
                 collection,
                 recent,
-                for_you
+                for_you,
+                now_playing,
+                backlog
             ],
             |r| {
                 Ok(GameItem {
@@ -450,12 +683,85 @@ impl Store {
                     downloaded: r.get(4)?,
                     favorite: r.get(5)?,
                     platform_slug: r.get(6)?,
+                    versions: r.get(7)?,
                 })
             },
         )
         .expect("query")
         .filter_map(Result::ok)
         .collect()
+    }
+
+    /// Every id in `id`'s group, `id` alone when it has no versions.
+    pub fn group_members(&self, id: i64) -> Vec<i64> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT g.id FROM games g
+                 WHERE g.card = (SELECT card FROM games WHERE id = ?1)",
+            )
+            .expect("prepare");
+        let ids: Vec<i64> = stmt
+            .query_map([id], |r| r.get(0))
+            .expect("query")
+            .filter_map(Result::ok)
+            .collect();
+        if ids.is_empty() {
+            vec![id]
+        } else {
+            ids
+        }
+    }
+
+    /// `id` and the versions RomM lists for it, the one its card shows first; empty when it has
+    /// none.
+    pub fn versions(&self, id: i64) -> Vec<Version> {
+        let mut stmt = self
+            .conn
+            .prepare(&format!(
+                "SELECT g.id, COALESCE(g.fs_name, g.title) FROM games g
+                 WHERE g.id = ?1 OR g.id IN ({})",
+                versions_of("?1")
+            ))
+            .expect("prepare");
+        let rows: Vec<(i64, String)> = stmt
+            .query_map([id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .expect("query")
+            .filter_map(Result::ok)
+            .collect();
+        if rows.len() < 2 {
+            return Vec::new();
+        }
+        let tags: Vec<String> = rows.iter().map(|(_, name)| versions::label(name)).collect();
+        let pick = self.group_pick(id);
+        let mut list: Vec<Version> = rows
+            .iter()
+            .zip(&tags)
+            .map(|((id, name), label)| Version {
+                id: *id,
+                label: if tags.iter().filter(|t| *t == label).count() > 1 {
+                    versions::stem(name).to_string()
+                } else {
+                    label.clone()
+                },
+            })
+            .collect();
+        list.sort_by_cached_key(|v| (Some(v.id) != pick, v.label.to_lowercase(), v.id));
+        list
+    }
+
+    /// The version the library shows for `id`'s game, leaving "downloaded only" aside.
+    pub fn group_pick(&self, id: i64) -> Option<i64> {
+        self.conn
+            .query_row(
+                "SELECT g.id FROM games g
+                 WHERE g.card = (SELECT card FROM games WHERE id = ?1)
+                 ORDER BY g.picked DESC, g.last_played IS NULL, g.last_played DESC, g.id
+                 LIMIT 1",
+                [id],
+                |r| r.get(0),
+            )
+            .ok()
     }
 
     pub fn rebase_local_paths(&self, old: &str, new: &str) -> usize {
@@ -480,8 +786,10 @@ impl Store {
     pub fn recent_count(&self, downloaded_only: bool) -> i64 {
         self.conn
             .query_row(
-                "SELECT COUNT(*) FROM games WHERE last_played IS NOT NULL
-                   AND (?1 = 0 OR local_path IS NOT NULL)",
+                &format!(
+                    "WITH {SHOWN} SELECT COALESCE(SUM(entries), 0) FROM shown
+                     WHERE card IN (SELECT card FROM games WHERE last_played IS NOT NULL)"
+                ),
                 [downloaded_only],
                 |r| r.get(0),
             )
@@ -585,8 +893,11 @@ impl Store {
     pub fn recommended_count(&self, downloaded_only: bool) -> i64 {
         self.conn
             .query_row(
-                "SELECT COUNT(*) FROM recommendations r JOIN games g ON g.id = r.rom_id
-                 WHERE ?1 = 0 OR g.local_path IS NOT NULL",
+                &format!(
+                    "WITH {SHOWN} SELECT COALESCE(SUM(entries), 0) FROM shown
+                     WHERE card IN (SELECT g.card FROM recommendations r
+                                          JOIN games g ON g.id = r.rom_id)"
+                ),
                 [downloaded_only],
                 |r| r.get(0),
             )
@@ -617,6 +928,61 @@ impl Store {
         self.merge_last_played(&[(id, when)]);
     }
 
+    /// Takes RomM's statuses as the whole truth: games it didn't list have none.
+    pub fn replace_play_statuses(&mut self, statuses: &[(i64, PlayStatus)]) {
+        let tx = self.conn.transaction().expect("tx");
+        tx.execute(
+            "UPDATE games SET now_playing = 0, backlogged = 0, progress = NULL",
+            [],
+        )
+        .expect("clear play statuses");
+        for (id, status) in statuses {
+            write_play_status(&tx, *id, *status);
+        }
+        tx.commit().expect("commit");
+    }
+
+    pub fn set_play_status(&self, id: i64, status: PlayStatus) {
+        write_play_status(&self.conn, id, status);
+    }
+
+    pub fn play_status(&self, id: i64) -> PlayStatus {
+        self.conn
+            .query_row(
+                "SELECT now_playing, backlogged, progress FROM games WHERE id = ?1",
+                [id],
+                |r| {
+                    Ok(PlayStatus {
+                        now_playing: r.get(0)?,
+                        backlogged: r.get(1)?,
+                        progress: r
+                            .get::<_, Option<String>>(2)?
+                            .as_deref()
+                            .and_then(Progress::parse),
+                    })
+                },
+            )
+            .unwrap_or_default()
+    }
+
+    /// How many games are now playing and how many are in the backlog.
+    pub fn status_counts(&self, downloaded_only: bool) -> (i64, i64) {
+        self.conn
+            .query_row(
+                &format!(
+                    "WITH {SHOWN}
+                     SELECT COALESCE(SUM(CASE WHEN card IN (SELECT card FROM games
+                                                WHERE now_playing = 1) THEN entries END), 0),
+                            COALESCE(SUM(CASE WHEN card IN (SELECT card FROM games
+                                                WHERE backlogged = 1) THEN entries END), 0)
+                     FROM shown"
+                ),
+                [downloaded_only],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("count play statuses")
+    }
+
     pub fn merge_last_played(&mut self, plays: &[(i64, i64)]) {
         let tx = self.conn.transaction().expect("tx");
         for (id, when) in plays {
@@ -630,12 +996,15 @@ impl Store {
     }
 
     pub fn game(&self, id: i64) -> Option<GameDetail> {
+        let linked = versions_of("g.id");
         self.conn
             .query_row(
+                &format!(
                 "SELECT g.id, g.title, g.platform_id, COALESCE(p.slug, ''), COALESCE(p.name, ''),
                         g.summary, g.size_bytes, g.cover_small, g.cover_large, g.local_path,
-                        p.category, g.meta, g.screenshots
-                 FROM games g LEFT JOIN platforms p ON p.id = g.platform_id WHERE g.id = ?1",
+                        p.category, g.meta, g.screenshots,
+                        CASE WHEN EXISTS ({linked}) THEN g.fs_name END
+                 FROM games g LEFT JOIN platforms p ON p.id = g.platform_id WHERE g.id = ?1"),
                 [id],
                 |r| {
                     Ok(GameDetail {
@@ -652,6 +1021,7 @@ impl Store {
                         platform_category: r.get(10)?,
                         meta: json_column(r.get(11)?),
                         screenshots: json_column(r.get(12)?),
+                        version_file: r.get(13)?,
                     })
                 },
             )
@@ -711,11 +1081,13 @@ impl Store {
             .expect("delete state record");
     }
 
-    pub fn in_game_save_record(&self, rom_id: i64) -> Option<InGameSaveRecord> {
+    /// The in-game save last synced for a game, or for one of its files (`variant`, "" for the
+    /// game itself).
+    pub fn in_game_save_record(&self, rom_id: i64, variant: &str) -> Option<InGameSaveRecord> {
         self.conn
             .query_row(
-                "SELECT md5, synced_at FROM in_game_save_sync WHERE rom_id = ?1",
-                [rom_id],
+                "SELECT md5, synced_at FROM in_game_save_sync WHERE rom_id = ?1 AND variant = ?2",
+                params![rom_id, variant],
                 |r| {
                     Ok(InGameSaveRecord {
                         md5: r.get(0)?,
@@ -726,12 +1098,20 @@ impl Store {
             .ok()
     }
 
-    pub fn set_in_game_save_record(&mut self, rom_id: i64, md5: &str, synced_at: i64) {
+    pub fn set_in_game_save_record(
+        &mut self,
+        rom_id: i64,
+        variant: &str,
+        md5: &str,
+        synced_at: i64,
+    ) {
         self.conn
             .execute(
-                "INSERT INTO in_game_save_sync (rom_id, md5, synced_at) VALUES (?1, ?2, ?3)
-                 ON CONFLICT(rom_id) DO UPDATE SET md5 = excluded.md5, synced_at = excluded.synced_at",
-                params![rom_id, md5, synced_at],
+                "INSERT INTO in_game_save_sync (rom_id, variant, md5, synced_at)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(rom_id, variant) DO UPDATE SET md5 = excluded.md5,
+                   synced_at = excluded.synced_at",
+                params![rom_id, variant, md5, synced_at],
             )
             .expect("write in-game save record");
     }
@@ -817,7 +1197,7 @@ impl Store {
                 "DELETE FROM games; DELETE FROM platforms; DELETE FROM state_sync; DELETE FROM pending_saves;
                  DELETE FROM play_sessions; DELETE FROM recommendations;
                  DELETE FROM pending_screenshots;
-                 DELETE FROM collections; DELETE FROM collection_roms;
+                 DELETE FROM collections; DELETE FROM collection_roms; DELETE FROM siblings;
                  DELETE FROM kv WHERE key = 'last_sync_at';",
             )
             .expect("clear library");
@@ -828,6 +1208,7 @@ impl Store {
 mod tests {
     use super::*;
     use crate::romm::types::rom;
+    use crate::romm::types::{MatchIds, SiblingRom};
 
     fn platform(id: i64, name: &str) -> Platform {
         Platform {
@@ -858,6 +1239,30 @@ mod tests {
 
     fn ids(s: &Store, f: GameFilter) -> Vec<i64> {
         s.games(&f).into_iter().map(|g| g.id).collect()
+    }
+
+    #[test]
+    fn a_chosen_file_is_kept_only_while_the_game_still_offers_it() {
+        let s = Store::open_in_memory().unwrap();
+        let files = [
+            "Hyper.smc".to_string(),
+            "Advent.smc".into(),
+            "Original.zip".into(),
+        ];
+        s.set_file_choices(7, &files);
+        assert_eq!(s.file_choices(7), files);
+        assert_eq!(s.chosen_file(7), None);
+        s.choose_file(7, "Advent.smc");
+        assert_eq!(s.chosen_file(7).as_deref(), Some("Advent.smc"));
+        s.choose_file(7, "Hyper.smc");
+        assert_eq!(s.chosen_file(7), None);
+        s.choose_file(7, "Original.zip");
+        s.set_file_choices(7, &files[..2]);
+        assert_eq!(s.chosen_file(7), None);
+        assert!(!s.knows_file_choices(8));
+        s.set_file_choices(7, &files[..1]);
+        assert!(s.file_choices(7).is_empty());
+        assert!(s.knows_file_choices(7));
     }
 
     #[test]
@@ -907,6 +1312,7 @@ mod tests {
         r.created_at = Some(added.into());
         r.rom_user = Some(crate::romm::types::RomUser {
             last_played: last.map(String::from),
+            ..Default::default()
         });
         r
     }
@@ -961,6 +1367,41 @@ mod tests {
         );
         assert_eq!(s.recent_count(false), 2);
         assert_eq!(s.recent_count(true), 0);
+    }
+
+    #[test]
+    fn play_statuses_are_replaced_by_the_servers_and_list_their_games() {
+        use crate::romm::types::{PlayStatus, Progress};
+        let mut s = Store::open_in_memory().unwrap();
+        s.upsert_games(&[
+            rom(1, 1, "Aladdin", "t"),
+            rom(2, 1, "Banjo", "t"),
+            rom(3, 1, "Castlevania", "t"),
+        ]);
+        let playing = PlayStatus {
+            now_playing: true,
+            ..PlayStatus::default()
+        };
+        let finished_backlog = PlayStatus {
+            backlogged: true,
+            progress: Some(Progress::Finished),
+            ..PlayStatus::default()
+        };
+        s.replace_play_statuses(&[(1, playing), (2, finished_backlog), (99, playing)]);
+        assert_eq!(s.play_status(2), finished_backlog);
+        assert_eq!(s.play_status(3), PlayStatus::default());
+        assert_eq!(sorted(&s, Scope::NowPlaying, SortOrder::Name), [1]);
+        assert_eq!(sorted(&s, Scope::Backlog, SortOrder::Name), [2]);
+        assert_eq!(s.status_counts(false), (1, 1));
+        assert_eq!(s.status_counts(true), (0, 0));
+
+        s.replace_play_statuses(&[(3, finished_backlog)]);
+        assert_eq!(s.play_status(1), PlayStatus::default());
+        assert_eq!(sorted(&s, Scope::Backlog, SortOrder::Name), [3]);
+
+        s.set_play_status(1, playing);
+        assert_eq!(s.play_status(1), playing);
+        assert_eq!(s.status_counts(false), (1, 1));
     }
 
     #[test]
@@ -1299,19 +1740,19 @@ mod tests {
         let path = dir.path().join("c.db");
         {
             let mut s = Store::open(&path).unwrap();
-            assert_eq!(s.in_game_save_record(7), None);
-            s.set_in_game_save_record(7, "aaa", 100);
-            s.set_in_game_save_record(7, "bbb", 200);
+            assert_eq!(s.in_game_save_record(7, ""), None);
+            s.set_in_game_save_record(7, "", "aaa", 100);
+            s.set_in_game_save_record(7, "", "bbb", 200);
         }
         let s = Store::open(&path).unwrap();
         assert_eq!(
-            s.in_game_save_record(7),
+            s.in_game_save_record(7, ""),
             Some(InGameSaveRecord {
                 md5: "bbb".into(),
                 synced_at: 200
             })
         );
-        assert_eq!(s.in_game_save_record(8), None);
+        assert_eq!(s.in_game_save_record(8, ""), None);
     }
 
     #[test]
@@ -1374,6 +1815,537 @@ mod tests {
         assert!(plain.screenshots.is_empty());
     }
 
+    fn card_of(s: &Store, id: i64) -> String {
+        s.conn
+            .query_row("SELECT card FROM games WHERE id = ?1", [id], |r| r.get(0))
+            .unwrap()
+    }
+
+    fn picked_ids(s: &Store) -> Vec<i64> {
+        let mut stmt = s
+            .conn
+            .prepare("SELECT id FROM games WHERE picked = 1 ORDER BY id")
+            .unwrap();
+        stmt.query_map([], |r| r.get(0))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect()
+    }
+
+    fn matched(id: i64, igdb: Option<i64>, siblings: &[i64]) -> Rom {
+        Rom {
+            sibling_roms: siblings.iter().map(|&id| SiblingRom { id }).collect(),
+            match_ids: MatchIds {
+                igdb_id: igdb,
+                ..MatchIds::default()
+            },
+            ..rom(id, 1, "Game", "t")
+        }
+    }
+
+    fn grouped() -> Store {
+        let mut s = seeded();
+        s.upsert_games(&[
+            matched(19, Some(7), &[20, 21]),
+            matched(20, Some(7), &[19, 21]),
+            matched(21, Some(7), &[19, 20]),
+        ]);
+        s
+    }
+
+    #[test]
+    fn v12_database_migrates_to_v13_and_forgets_the_sync_cursor() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("v12.db");
+        {
+            let mut s = Store::open(&path).unwrap();
+            s.set("last_sync_at", "t");
+            s.upsert_games(&[rom(5, 1, "A", "t")]);
+            s.conn
+                .execute_batch(
+                    "DROP INDEX games_card; ALTER TABLE games DROP COLUMN card;
+                     ALTER TABLE games DROP COLUMN fs_name; ALTER TABLE games DROP COLUMN picked;
+                     PRAGMA user_version = 12;",
+                )
+                .unwrap();
+        }
+        let s = Store::open(&path).unwrap();
+        assert_eq!(s.get("last_sync_at"), None);
+        assert_eq!(card_of(&s, 5), "romm-1-5");
+    }
+
+    #[test]
+    fn v13_database_migrates_to_v14_and_forgets_the_sync_cursor() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("v13.db");
+        {
+            let s = Store::open(&path).unwrap();
+            s.set("last_sync_at", "t");
+            s.conn
+                .execute_batch(
+                    "DROP TABLE siblings; DROP INDEX games_card; ALTER TABLE games DROP COLUMN card;
+                     ALTER TABLE games ADD COLUMN group_id INTEGER;
+                     CREATE INDEX games_group ON games(group_id);
+                     PRAGMA user_version = 13;",
+                )
+                .unwrap();
+        }
+        let s = Store::open(&path).unwrap();
+        assert_eq!(s.get("last_sync_at"), None);
+        assert!(s
+            .conn
+            .prepare("SELECT rom_id, sibling_id FROM siblings")
+            .is_ok());
+    }
+
+    #[test]
+    fn v14_database_migrates_to_v15_and_forgets_the_sync_cursor() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("v14.db");
+        {
+            let mut s = Store::open(&path).unwrap();
+            s.set("last_sync_at", "t");
+            s.set("versions_repaired", "1");
+            s.upsert_games(&[rom(5, 1, "A", "t")]);
+            s.conn
+                .execute_batch(
+                    "DROP INDEX games_card; ALTER TABLE games DROP COLUMN card;
+                     ALTER TABLE games ADD COLUMN group_id INTEGER;
+                     CREATE INDEX games_group ON games(group_id);
+                     PRAGMA user_version = 14;",
+                )
+                .unwrap();
+        }
+        let s = Store::open(&path).unwrap();
+        assert_eq!(s.get("last_sync_at"), None);
+        assert_eq!(s.get("versions_repaired"), None);
+        assert_eq!(card_of(&s, 5), "romm-1-5");
+    }
+
+    #[test]
+    fn v15_database_keeps_its_save_records_for_each_game_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("v15.db");
+        {
+            let s = Store::open(&path).unwrap();
+            s.conn
+                .execute_batch(
+                    "DROP TABLE in_game_save_sync;
+                     CREATE TABLE in_game_save_sync (rom_id INTEGER PRIMARY KEY,
+                       md5 TEXT NOT NULL, synced_at INTEGER NOT NULL);
+                     INSERT INTO in_game_save_sync VALUES (5, 'abc', 100);
+                     PRAGMA user_version = 15;",
+                )
+                .unwrap();
+        }
+        let mut s = Store::open(&path).unwrap();
+        assert_eq!(s.in_game_save_record(5, "").unwrap().md5, "abc");
+        s.set_in_game_save_record(5, "Advent", "def", 200);
+        assert_eq!(s.in_game_save_record(5, "").unwrap().md5, "abc");
+        assert_eq!(s.in_game_save_record(5, "Advent").unwrap().md5, "def");
+    }
+
+    #[test]
+    fn games_share_a_card_by_their_first_match() {
+        let mut s = seeded();
+        s.upsert_games(&[
+            matched(20, Some(7), &[21]),
+            matched(21, Some(7), &[20]),
+            matched(22, None, &[20]),
+        ]);
+        assert_eq!(card_of(&s, 20), "igdb-1-7");
+        assert_eq!(card_of(&s, 21), "igdb-1-7");
+        assert_eq!(card_of(&s, 22), "romm-1-22");
+        s.upsert_games(&[matched(22, Some(7), &[20])]);
+        assert_eq!(card_of(&s, 22), "igdb-1-7");
+    }
+
+    #[test]
+    fn set_picked_moves_the_pick_within_the_group() {
+        let mut s = grouped();
+        s.set_picks(&[21]);
+        s.set_picked(20);
+        assert_eq!(picked_ids(&s), [20]);
+    }
+
+    fn versioned(
+        s: &mut Store,
+        id: i64,
+        platform: i64,
+        title: &str,
+        fs_name: &str,
+        siblings: &[i64],
+    ) {
+        let igdb = (!siblings.is_empty()).then(|| siblings.iter().copied().chain([id]).min());
+        s.upsert_games(&[Rom {
+            fs_name: fs_name.into(),
+            sibling_roms: siblings.iter().map(|&id| SiblingRom { id }).collect(),
+            match_ids: MatchIds {
+                igdb_id: igdb.flatten(),
+                ..MatchIds::default()
+            },
+            ..rom(id, platform, title, "t")
+        }]);
+    }
+
+    fn with_versions() -> Store {
+        let mut s = Store::open_in_memory().unwrap();
+        s.replace_platforms(&[platform(1, "PlayStation"), platform(2, "Game Boy")]);
+        let ff = "Final Fantasy VII";
+        versioned(
+            &mut s,
+            30,
+            1,
+            ff,
+            "Final Fantasy VII (Japan).chd",
+            &[31, 32],
+        );
+        versioned(&mut s, 31, 1, ff, "Final Fantasy VII (USA).chd", &[30, 32]);
+        versioned(
+            &mut s,
+            32,
+            1,
+            ff,
+            "Final Fantasy VII (Europe) (Demo).chd",
+            &[30, 31],
+        );
+        versioned(&mut s, 40, 2, "Tetris", "g40.gb", &[]);
+        s
+    }
+
+    fn item(s: &Store, f: GameFilter, id: i64) -> GameItem {
+        s.games(&f).into_iter().find(|g| g.id == id).unwrap()
+    }
+
+    fn scoped(scope: Scope) -> GameFilter {
+        GameFilter {
+            scope,
+            ..GameFilter::default()
+        }
+    }
+
+    #[test]
+    fn a_game_with_versions_shows_once_as_the_pick() {
+        let mut s = with_versions();
+        s.set_picks(&[31, 40]);
+        assert_eq!(ids(&s, GameFilter::default()), [31, 40]);
+        assert_eq!(item(&s, GameFilter::default(), 31).versions, 3);
+        assert_eq!(item(&s, GameFilter::default(), 40).versions, 1);
+    }
+
+    #[test]
+    fn a_group_without_a_pick_shows_once() {
+        let mut s = with_versions();
+        s.set_picks(&[40]);
+        assert_eq!(ids(&s, GameFilter::default()), [30, 40]);
+    }
+
+    /// Zelda's three versions match on IGDB and RetroAchievements; a hack with a lower id matches
+    /// on RetroAchievements alone, so RomM shows it as a card of its own.
+    fn with_a_hack() -> Store {
+        let mut s = Store::open_in_memory().unwrap();
+        s.replace_platforms(&[platform(1, "NES")]);
+        let zelda = |id, fs_name: &str, igdb, siblings: &[i64]| Rom {
+            fs_name: fs_name.into(),
+            sibling_roms: siblings.iter().map(|&id| SiblingRom { id }).collect(),
+            match_ids: MatchIds {
+                igdb_id: igdb,
+                ra_id: Some(1),
+                ..MatchIds::default()
+            },
+            ..rom(id, 1, "The Legend of Zelda", "t")
+        };
+        s.upsert_games(&[
+            zelda(5, "Zelda Outlands.nes", None, &[10, 11, 12]),
+            zelda(
+                10,
+                "Legend of Zelda, The (USA).nes",
+                Some(1022),
+                &[5, 11, 12],
+            ),
+            zelda(
+                11,
+                "Legend of Zelda, The (Europe).nes",
+                Some(1022),
+                &[5, 10, 12],
+            ),
+            zelda(
+                12,
+                "Legend of Zelda, The (USA) (Rev A).nes",
+                Some(1022),
+                &[5, 10, 11],
+            ),
+        ]);
+        s.set_picks(&[5, 10]);
+        s
+    }
+
+    #[test]
+    fn a_hack_is_its_own_card_and_still_a_version_as_in_romm() {
+        let s = with_a_hack();
+        assert_eq!(ids(&s, GameFilter::default()), [5, 10]);
+        assert_eq!(item(&s, GameFilter::default(), 10).versions, 4);
+        assert_eq!(item(&s, GameFilter::default(), 5).versions, 4);
+        let mut zelda: Vec<_> = s.versions(10).into_iter().map(|v| v.id).collect();
+        assert_eq!(zelda.remove(0), 10);
+        zelda.sort_unstable();
+        assert_eq!(zelda, [5, 11, 12]);
+        let counts: Vec<_> = s
+            .platforms(false)
+            .into_iter()
+            .map(|p| (p.id, p.count))
+            .collect();
+        assert_eq!(counts, [(1, 2)]);
+    }
+
+    #[test]
+    fn the_more_recently_updated_rom_decides_whether_two_are_versions() {
+        let mut s = Store::open_in_memory().unwrap();
+        let at = |id, updated: &str, siblings: &[i64]| Rom {
+            sibling_roms: siblings.iter().map(|&id| SiblingRom { id }).collect(),
+            ..rom(id, 1, "Game", updated)
+        };
+        s.upsert_games(&[at(1, "2026-01-01", &[2]), at(2, "2026-01-01", &[1])]);
+        s.upsert_games(&[at(3, "2026-02-01", &[1])]);
+        assert_eq!(item(&s, GameFilter::default(), 1).versions, 3);
+        s.upsert_games(&[at(2, "2026-03-01", &[])]);
+        assert_eq!(item(&s, GameFilter::default(), 1).versions, 2);
+        assert!(s.game(2).unwrap().version_file.is_none());
+    }
+
+    #[test]
+    fn lists_follow_the_card() {
+        let mut s = with_a_hack();
+        s.mark_played(12, 1_000);
+        s.set_play_status(
+            12,
+            PlayStatus {
+                backlogged: true,
+                ..PlayStatus::default()
+            },
+        );
+        s.replace_collections(&[CollectionRecord {
+            key: "c:5".into(),
+            kind: CollectionKind::Mine,
+            remote_id: "5".into(),
+            name: "Couch".into(),
+            owner: None,
+            rom_ids: vec![12],
+        }]);
+        s.replace_recommendations(&[(12, "Because".into())]);
+        assert_eq!(ids(&s, scoped(Scope::Recent)), [10]);
+        assert_eq!(s.recent_count(false), 1);
+        assert_eq!(s.recommended_count(false), 1);
+        assert_eq!(s.status_counts(false), (0, 1));
+        assert_eq!(s.collection("c:5").unwrap().count, 1);
+        s.set_local_path(11, Some("/roms/zelda-europe.nes"));
+        let downloaded = GameFilter {
+            downloaded_only: true,
+            ..GameFilter::default()
+        };
+        assert_eq!(ids(&s, downloaded), [11]);
+        assert_eq!(s.recent_count(true), 1);
+        assert_eq!(s.platforms(true)[0].count, 1);
+    }
+
+    #[test]
+    fn games_tied_by_one_wrong_match_stay_apart_when_their_first_matches_differ() {
+        let mut s = Store::open_in_memory().unwrap();
+        s.replace_platforms(&[platform(1, "Plus/4")]);
+        for (id, title) in [(1, "Atomic Mission"), (2, "Jack Attack"), (3, "Logo")] {
+            let siblings: Vec<i64> = [1, 2, 3].into_iter().filter(|&o| o != id).collect();
+            s.upsert_games(&[Rom {
+                fs_name: format!("{title} (USA).bin"),
+                sibling_roms: siblings.iter().map(|&id| SiblingRom { id }).collect(),
+                match_ids: MatchIds {
+                    igdb_id: Some(id),
+                    ra_id: Some(9),
+                    ..MatchIds::default()
+                },
+                ..rom(id, 1, title, "t")
+            }]);
+        }
+        s.set_picks(&[1, 2, 3]);
+        assert_eq!(ids(&s, GameFilter::default()), [1, 2, 3]);
+    }
+
+    #[test]
+    fn choosing_a_version_takes_its_siblings_along() {
+        let mut s = with_versions();
+        s.set_picks(&[31, 40]);
+        s.set_picked(32);
+        assert_eq!(ids(&s, GameFilter::default()), [32, 40]);
+        assert_eq!(item(&s, GameFilter::default(), 32).versions, 3);
+    }
+
+    #[test]
+    fn search_finds_a_game_by_another_versions_file_name() {
+        let mut s = with_versions();
+        s.set_picks(&[31, 40]);
+        let search = |text: &str| GameFilter {
+            search: text.into(),
+            ..GameFilter::default()
+        };
+        assert_eq!(ids(&s, search("Demo")), [31]);
+        assert_eq!(ids(&s, search("Japan")), [31]);
+        assert_eq!(ids(&s, search("g40")), Vec::<i64>::new());
+    }
+
+    #[test]
+    fn lists_show_the_game_when_any_version_belongs() {
+        let mut s = with_versions();
+        s.set_picks(&[31, 40]);
+        s.set_play_status(
+            30,
+            PlayStatus {
+                now_playing: true,
+                ..PlayStatus::default()
+            },
+        );
+        s.replace_collections(&[CollectionRecord {
+            key: "c:5".into(),
+            kind: CollectionKind::Mine,
+            remote_id: "5".into(),
+            name: "Couch".into(),
+            owner: None,
+            rom_ids: vec![32],
+        }]);
+        s.mark_played(30, 1_000);
+        assert_eq!(ids(&s, scoped(Scope::NowPlaying)), [31]);
+        assert_eq!(ids(&s, scoped(Scope::Collection("c:5".into()))), [31]);
+        assert_eq!(ids(&s, scoped(Scope::Recent)), [31]);
+        assert_eq!(s.status_counts(false), (1, 0));
+        assert_eq!(s.recent_count(false), 1);
+        assert_eq!(s.collection("c:5").unwrap().count, 1);
+    }
+
+    #[test]
+    fn unfavoriting_clears_every_version() {
+        let mut s = with_versions();
+        s.set_picks(&[31, 40]);
+        s.replace_collections(&[CollectionRecord {
+            key: "c:1".into(),
+            kind: CollectionKind::Favorites,
+            remote_id: "1".into(),
+            name: "Favorites".into(),
+            owner: None,
+            rom_ids: vec![30],
+        }]);
+        assert!(item(&s, GameFilter::default(), 31).favorite);
+        for member in s.group_members(31) {
+            s.set_member("c:1", member, false);
+        }
+        assert!(!item(&s, GameFilter::default(), 31).favorite);
+    }
+
+    #[test]
+    fn sorting_by_last_played_uses_the_latest_version() {
+        let mut s = with_versions();
+        s.set_picks(&[31, 40]);
+        let day = 86_400;
+        let now = 100 * day;
+        s.mark_played(30, now - day);
+        s.mark_played(40, now - 7 * day);
+        assert_eq!(sorted(&s, Scope::All, SortOrder::LastPlayed), [31, 40]);
+    }
+
+    #[test]
+    fn downloaded_only_shows_a_downloaded_version() {
+        let mut s = with_versions();
+        s.set_picks(&[31, 40]);
+        let downloaded = GameFilter {
+            downloaded_only: true,
+            ..GameFilter::default()
+        };
+        s.set_local_path(30, Some("/roms/ff7-japan.chd"));
+        assert_eq!(ids(&s, downloaded.clone()), [30]);
+        assert!(item(&s, downloaded.clone(), 30).downloaded);
+        s.set_local_path(31, Some("/roms/ff7-usa.chd"));
+        assert_eq!(ids(&s, downloaded), [31]);
+        let counts: Vec<_> = s
+            .platforms(true)
+            .into_iter()
+            .map(|p| (p.id, p.count))
+            .collect();
+        assert_eq!(counts, [(1, 1)]);
+    }
+
+    #[test]
+    fn a_removed_version_leaves_the_group() {
+        let mut s = with_versions();
+        s.set_picks(&[31, 40]);
+        s.retain_games(&[30, 31, 40]);
+        assert_eq!(s.versions(31).len(), 2);
+        assert_eq!(item(&s, GameFilter::default(), 31).versions, 2);
+    }
+
+    #[test]
+    fn only_a_game_with_versions_names_its_file() {
+        let mut s = with_versions();
+        s.set_picks(&[31, 40]);
+        assert_eq!(
+            s.game(32).unwrap().version_file.as_deref(),
+            Some("Final Fantasy VII (Europe) (Demo).chd")
+        );
+        assert_eq!(s.game(40).unwrap().version_file, None);
+    }
+
+    #[test]
+    fn versions_list_the_pick_first_with_labels() {
+        let mut s = with_versions();
+        s.set_picks(&[31, 40]);
+        let versions = s.versions(30);
+        let ids: Vec<_> = versions.iter().map(|v| v.id).collect();
+        let labels: Vec<_> = versions.iter().map(|v| v.label.as_str()).collect();
+        assert_eq!(ids, [31, 32, 30]);
+        assert_eq!(labels, ["USA", "Europe, Demo", "Japan"]);
+        assert!(s.versions(40).is_empty());
+    }
+
+    #[test]
+    fn versions_with_the_same_tags_are_told_apart_by_file_name() {
+        let mut s = Store::open_in_memory().unwrap();
+        versioned(&mut s, 50, 1, "Doom", "Doom (USA).zip", &[51]);
+        versioned(&mut s, 51, 1, "Doom", "Doom II (USA).zip", &[50]);
+        s.set_picks(&[50]);
+        let labels: Vec<_> = s.versions(50).into_iter().map(|v| v.label).collect();
+        assert_eq!(labels, ["Doom (USA)", "Doom II (USA)"]);
+    }
+
+    #[test]
+    fn set_picked_then_restoring_the_previous_pick_round_trips() {
+        let mut s = with_versions();
+        s.set_picks(&[31, 40]);
+        let before = ids(&s, GameFilter::default());
+        let prev = s.group_pick(30).unwrap();
+        s.set_picked(32);
+        assert_ne!(ids(&s, GameFilter::default()), before);
+        s.set_picked(prev);
+        assert_eq!(ids(&s, GameFilter::default()), before);
+    }
+
+    #[test]
+    fn undoing_a_pick_leaves_a_newer_one_alone() {
+        let mut s = with_versions();
+        s.set_picks(&[31, 40]);
+        s.set_picked(32);
+        s.undo_pick(32, 31);
+        assert_eq!(s.group_pick(30), Some(31));
+        s.set_picked(32);
+        s.set_picked(30);
+        s.undo_pick(32, 31);
+        assert_eq!(s.group_pick(30), Some(30));
+    }
+
+    #[test]
+    fn group_pick_follows_the_pick() {
+        let mut s = with_versions();
+        s.set_picks(&[31, 40]);
+        assert_eq!(s.group_pick(30), Some(31));
+        assert_eq!(s.group_pick(40), Some(40));
+        assert_eq!(s.group_pick(99), None);
+    }
+
     #[test]
     fn v2_database_migrates_to_v3_and_forgets_the_sync_cursor() {
         let dir = tempfile::tempdir().unwrap();
@@ -1386,7 +2358,12 @@ mod tests {
                     "ALTER TABLE games DROP COLUMN meta; ALTER TABLE games DROP COLUMN screenshots;
                      ALTER TABLE games DROP COLUMN added_at; ALTER TABLE games DROP COLUMN last_played;
                      ALTER TABLE platforms DROP COLUMN category;
-                     ALTER TABLE platforms DROP COLUMN aliases; PRAGMA user_version = 2;",
+                     ALTER TABLE platforms DROP COLUMN aliases;
+                     ALTER TABLE games DROP COLUMN now_playing; ALTER TABLE games DROP COLUMN backlogged;
+                     ALTER TABLE games DROP COLUMN progress;
+                     DROP INDEX games_card; ALTER TABLE games DROP COLUMN card;
+                     ALTER TABLE games DROP COLUMN fs_name; ALTER TABLE games DROP COLUMN picked;
+                     PRAGMA user_version = 2;",
                 )
                 .unwrap();
         }

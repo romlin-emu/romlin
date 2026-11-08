@@ -16,7 +16,8 @@ use crate::saves::{self, SramOutcome};
 use crate::store::GameDetail;
 use crate::xemu::{self, Xemu};
 use crate::{GameCard, Shot};
-use slint::{Image, Model, ModelRc, VecModel};
+use slint::{Image, Model, ModelRc, SharedString, VecModel};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -29,6 +30,7 @@ pub(super) struct GameState {
     detail: GameDetail,
     pub(super) shots: Rc<VecModel<Shot>>,
     similar: Rc<VecModel<GameCard>>,
+    versions: Vec<i64>,
 }
 
 fn load_image(path: &Path) -> Option<Image> {
@@ -127,6 +129,7 @@ impl Controller {
             detail: detail.clone(),
             shots: shots.clone(),
             similar: similar.clone(),
+            versions: Vec::new(),
         });
         self.refresh_game_page(true);
         if let Some(ui) = self.ui() {
@@ -141,6 +144,7 @@ impl Controller {
         self.show_save_slots(&detail);
         self.load_play_stats(id);
         self.load_similar(id);
+        self.load_file_choices(id);
     }
 
     pub(super) fn with_game<T>(&self, id: i64, f: impl FnOnce(&GameState) -> T) -> Option<T> {
@@ -200,6 +204,37 @@ impl Controller {
         });
     }
 
+    /// Looks up once which files a multi-file game can start with, for its page's file menu.
+    fn load_file_choices(&self, id: i64) {
+        let client = self.client.borrow().clone();
+        let Some(client) = client.filter(|_| !self.offline.get()) else {
+            return;
+        };
+        if self.shared.store.lock().unwrap().knows_file_choices(id) {
+            return;
+        }
+        let store = self.shared.store.clone();
+        self.shared.rt.spawn(async move {
+            let rom = match client.rom_detail(id).await {
+                Ok(rom) => rom,
+                Err(e) => return tracing::warn!("files of {id}: {e}"),
+            };
+            let Ok(files) = crate::layout::plan(&rom) else {
+                return;
+            };
+            let choices: Vec<String> = crate::layout::file_choices(&rom, &files)
+                .iter()
+                .map(|c| c.to_string_lossy().into_owned())
+                .collect();
+            store.lock().unwrap().set_file_choices(id, &choices);
+            on_ui(move |c| {
+                if c.current_game_id() == Some(id) {
+                    c.refresh_file_controls(id);
+                }
+            });
+        });
+    }
+
     fn load_similar(&self, id: i64) {
         let client = self.client.borrow().clone();
         let Some(client) = client.filter(|_| !self.offline.get()) else {
@@ -216,7 +251,13 @@ impl Controller {
     fn show_similar(&self, id: i64, ids: Vec<i64>) {
         let games: Vec<GameDetail> = {
             let store = self.shared.store.lock().unwrap();
-            ids.iter().filter_map(|&i| store.game(i)).collect()
+            let own = store.group_pick(id).unwrap_or(id);
+            let mut seen = HashSet::new();
+            ids.iter()
+                .filter_map(|&i| store.group_pick(i))
+                .filter(|&pick| pick != own && seen.insert(pick))
+                .filter_map(|pick| store.game(pick))
+                .collect()
         };
         let mut wanted = Vec::new();
         let cards: Vec<GameCard> = games
@@ -239,6 +280,7 @@ impl Controller {
                     downloaded: g.local_path.is_some(),
                     focused: false,
                     favorite: false,
+                    versions: 1,
                     aspect: details::box_aspect(&g.platform_slug),
                 }
             })
@@ -387,6 +429,9 @@ impl Controller {
                 && !self.preparing.get(),
         );
         self.refresh_collection_controls(detail.id);
+        self.refresh_status_controls(detail.id);
+        self.refresh_version_controls(detail.id);
+        self.refresh_file_controls(detail.id);
         ui.set_game_can_download(!self.offline.get() && self.downloading_id().is_none());
         if !playable {
             ui.set_game_status(tr!("Romlin can't play {} games yet.", detail.platform).into());
@@ -488,6 +533,11 @@ impl Controller {
         self.refresh_game_page(false);
         let covers = self.shared.covers.clone();
         let id = detail.id;
+        let store = self.shared.store.clone();
+        let pick = match origin {
+            Origin::Page => store.lock().unwrap().chosen_file(id).map(PathBuf::from),
+            Origin::Install(_) => None,
+        };
         self.shared.rt.spawn(async move {
             let last = AtomicU64::new(u64::MAX);
             let progress = |done: u64, total: u64| {
@@ -497,9 +547,25 @@ impl Controller {
                 }
             };
             let roms = paths::server_roms_dir(client.base().as_str());
-            let downloaded =
-                download_files(&client, id, &roms, only.as_deref(), &progress, &cancel).await;
+            let downloaded = download_files(
+                &client,
+                id,
+                &roms,
+                only.as_deref(),
+                pick.as_deref(),
+                &progress,
+                &cancel,
+            )
+            .await;
             let fetched = downloaded.as_ref().is_ok_and(|d| d.fetched);
+            if let Ok(d) = &downloaded {
+                let choices: Vec<String> = d
+                    .choices
+                    .iter()
+                    .map(|c| c.to_string_lossy().into_owned())
+                    .collect();
+                store.lock().unwrap().set_file_choices(id, &choices);
+            }
             let mut result = downloaded.map(|d| d.launch);
             if let Ok(path) = &result {
                 if detail.platform_slug == rpcs3::PLATFORM && rpcs3::is_archive(path) {
@@ -750,7 +816,10 @@ impl Controller {
             let sram = match (&client, sync) {
                 (Some(client), Some((device, game))) => {
                     on_ui(move |c| c.game_status(id, tr!("Syncing your save…")));
-                    let last = store.lock().unwrap().in_game_save_record(game.rom_id);
+                    let last = store
+                        .lock()
+                        .unwrap()
+                        .in_game_save_record(game.rom_id, game.record_variant());
                     let result = saves::sync_sram(client, &device, &game, last.as_ref()).await;
                     if let Ok(outcome) = &result {
                         saves::remember_outcome(&store, &game, outcome);
@@ -936,7 +1005,10 @@ impl Controller {
             .await;
             let sram = if ready.is_ok() && !offline {
                 if let (Some(client), Some(device)) = (&client, device) {
-                    let last = store.lock().unwrap().in_game_save_record(id);
+                    let last = store
+                        .lock()
+                        .unwrap()
+                        .in_game_save_record(id, game.record_variant());
                     let result = saves::sync_sram(client, &device, &game, last.as_ref()).await;
                     if let Ok(outcome) = &result {
                         saves::remember_outcome(&store, &game, outcome);
@@ -1185,6 +1257,141 @@ impl Controller {
         }
     }
 
+    fn refresh_version_controls(&self, id: i64) {
+        let versions = self.shared.store.lock().unwrap().versions(id);
+        let index = versions.iter().position(|v| v.id == id).unwrap_or(0);
+        if let Some(ui) = self.ui() {
+            let labels: Vec<SharedString> =
+                versions.iter().map(|v| v.label.as_str().into()).collect();
+            ui.set_game_versions(ModelRc::new(VecModel::from(labels)));
+            ui.set_game_version_index(index as i32);
+        }
+        if let Some(state) = self.game.borrow_mut().as_mut() {
+            state.versions = versions.into_iter().map(|v| v.id).collect();
+        }
+    }
+
+    fn refresh_file_controls(&self, id: i64) {
+        let (files, chosen) = {
+            let store = self.shared.store.lock().unwrap();
+            (store.file_choices(id), store.chosen_file(id))
+        };
+        let index = chosen
+            .and_then(|chosen| files.iter().position(|f| *f == chosen))
+            .unwrap_or(0);
+        if let Some(ui) = self.ui() {
+            let labels: Vec<SharedString> = files
+                .iter()
+                .map(|f| {
+                    Path::new(f)
+                        .file_name()
+                        .map_or_else(|| f.clone(), |n| n.to_string_lossy().into_owned())
+                        .into()
+                })
+                .collect();
+            ui.set_game_files(ModelRc::new(VecModel::from(labels)));
+            ui.set_game_file_index(index as i32);
+        }
+    }
+
+    /// Starts a multi-file game with another of its files from now on, with that file's saves.
+    pub(super) fn choose_file(&self, index: usize) {
+        let Some(detail) = self.current_game() else {
+            return;
+        };
+        if self.running.borrow().is_some() || self.preparing.get() {
+            return self.game_status(detail.id, tr!("Close the running game first."));
+        }
+        let Some(file) = self
+            .shared
+            .store
+            .lock()
+            .unwrap()
+            .file_choices(detail.id)
+            .get(index)
+            .cloned()
+        else {
+            return;
+        };
+        let here = Some(
+            paths::server_roms_dir(&self.server())
+                .join(&detail.platform_slug)
+                .join(detail.id.to_string())
+                .join(&file),
+        )
+        .filter(|path| path.exists());
+        {
+            let mut store = self.shared.store.lock().unwrap();
+            store.choose_file(detail.id, &file);
+            store.set_local_path(
+                detail.id,
+                here.as_deref().map(|p| p.to_string_lossy()).as_deref(),
+            );
+        }
+        self.refresh_game_page(false);
+        if let Some(detail) = self.current_game() {
+            self.show_save_slots(&detail);
+        }
+    }
+
+    pub(super) fn choose_version(&self, index: usize) {
+        let Some(id) = self
+            .game
+            .borrow()
+            .as_ref()
+            .and_then(|g| g.versions.get(index).copied())
+        else {
+            return;
+        };
+        if self.current_game_id() == Some(id) {
+            return;
+        }
+        let client = self.client.borrow().clone();
+        let Some(client) = client.filter(|_| self.can_edit_status()) else {
+            self.open_game(id);
+            if self.offline.get() {
+                self.game_status(
+                    id,
+                    tr!("You're offline, so this version doesn't become your main one."),
+                );
+            }
+            return;
+        };
+        let prev = {
+            let mut store = self.shared.store.lock().unwrap();
+            let prev = store.group_pick(id);
+            store.set_picked(id);
+            prev
+        };
+        self.reload_games();
+        self.open_game(id);
+        self.shared.rt.spawn(async move {
+            let result = client.set_main_version(id).await;
+            // RomM clears the old main version's siblings too, which can change what other cards
+            // show, so take its picks again rather than guessing.
+            let picks = match result {
+                Ok(()) => client.picked_rom_ids().await.ok(),
+                Err(_) => None,
+            };
+            on_ui(move |c| {
+                if let Some(picks) = picks.filter(|p| !p.is_empty()) {
+                    c.shared.store.lock().unwrap().set_picks(&picks);
+                    c.reload_games();
+                }
+                if let Err(e) = result {
+                    if let Some(prev) = prev {
+                        c.shared.store.lock().unwrap().undo_pick(id, prev);
+                    }
+                    c.reload_games();
+                    if let Some(current) = c.current_game_id() {
+                        c.refresh_version_controls(current);
+                    }
+                    c.game_status(id, tr!("Couldn't make this your main version: {e}.", e));
+                }
+            });
+        });
+    }
+
     pub(super) fn game_status(&self, id: i64, text: String) {
         if self.current_game().map(|g| g.id) == Some(id) {
             if let Some(ui) = self.ui() {
@@ -1278,7 +1485,10 @@ impl Controller {
             return;
         }
         self.preparing.set(false);
-        let save_dir = paths::game_save_dir(&paths::data_dir(), &self.server(), detail.id);
+        let save_dir = self.game_saves(&detail).map_or_else(
+            || paths::game_save_dir(&paths::data_dir(), &self.server(), detail.id),
+            |game| game.dir,
+        );
         let prefs = self.prefs.get().for_game_mode(self.game_mode);
         let states = core_for_platform(&detail.platform_slug)
             .is_none_or(|core| crate::cores::saves_states(core.id));

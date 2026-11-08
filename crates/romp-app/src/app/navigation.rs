@@ -5,7 +5,7 @@ use super::{
 use crate::gamepads::Button;
 use crate::gettext_noop;
 use crate::i18n::translate;
-use crate::input::{A, B, DOWN, L, LEFT, R, RIGHT, START, UP, X};
+use crate::input::{A, B, DOWN, L, LEFT, R, RIGHT, START, UP, X, Y};
 use crate::mapping::BUTTONS;
 use crate::navigation::{move_in_grid, Dir};
 use crate::pad_labels::{badge, Badge, Family};
@@ -57,7 +57,7 @@ impl Controller {
         let Some(ui) = self.ui() else { return };
         let hints = match family {
             Some(family) if !ui.get_dialog_open() && !ui.get_remap_open() => {
-                hints(ui.get_screen(), family)
+                hints(ui.get_screen(), family, shoulder_menu(&ui))
             }
             _ => Vec::new(),
         };
@@ -128,6 +128,7 @@ impl Controller {
             (SCREEN_LIBRARY, L) => self.step_sidebar(-1),
             (SCREEN_LIBRARY, R) => self.step_sidebar(1),
             (SCREEN_LIBRARY, START) => self.open_settings(),
+            (SCREEN_LIBRARY, Y) => self.surprise(),
             (SCREEN_GAME | SCREEN_SETTINGS, UP | DOWN | LEFT | RIGHT | A) => {
                 navigate_controls(ui.window(), button);
             }
@@ -136,13 +137,28 @@ impl Controller {
                     self.back_to_library();
                 }
             }
-            (SCREEN_GAME, L | R) => {
-                let delta = if button == L { 160.0 } else { -160.0 };
-                ui.set_game_scroll_y(ui.get_game_scroll_y() + delta);
-            }
             (SCREEN_GAME, X) => {
                 if ui.get_can_edit_collections() {
                     self.toggle_favorite();
+                }
+            }
+            (SCREEN_GAME, L | R) => {
+                let stepped = match shoulder_menu(&ui) {
+                    Some(Menu::Versions) => {
+                        let count = ui.get_game_versions().row_count();
+                        version_step(button, ui.get_game_version_index(), count)
+                            .inspect(|&index| self.choose_version(index))
+                    }
+                    Some(Menu::Files) => {
+                        let count = ui.get_game_files().row_count();
+                        version_step(button, ui.get_game_file_index(), count)
+                            .inspect(|&index| self.choose_file(index))
+                    }
+                    None => None,
+                };
+                if stepped.is_none() {
+                    let delta = if button == L { 160.0 } else { -160.0 };
+                    ui.set_game_scroll_y(ui.get_game_scroll_y() + delta);
                 }
             }
             (SCREEN_SETTINGS, L | R) => {
@@ -267,10 +283,37 @@ fn tab_step(button: u32, rtl: bool) -> i32 {
     }
 }
 
+/// The version LB or RB moves to from `index`, staying put at either end of the list.
+/// A menu on the game page the shoulder buttons step through.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Menu {
+    Versions,
+    Files,
+}
+
+/// The game page's versions, else its files, when it has more than one.
+fn shoulder_menu(ui: &crate::AppWindow) -> Option<Menu> {
+    if ui.get_game_versions().row_count() > 1 {
+        Some(Menu::Versions)
+    } else if ui.get_game_files().row_count() > 1 {
+        Some(Menu::Files)
+    } else {
+        None
+    }
+}
+
+fn version_step(button: u32, index: i32, count: usize) -> Option<usize> {
+    if count < 2 {
+        return None;
+    }
+    let step = if button == L { -1 } else { 1 };
+    Some((index + step).clamp(0, count as i32 - 1) as usize)
+}
+
 /// The buttons in a hint and what pressing them does.
 pub(super) type Hint = (Vec<Badge>, &'static str);
 
-fn hints(screen: i32, family: Family) -> Vec<Hint> {
+fn hints(screen: i32, family: Family, menu: Option<Menu>) -> Vec<Hint> {
     let key = |button: Button| badge(family, button);
     let shoulders = vec![key(Button::LeftTrigger), key(Button::RightTrigger)];
     match screen {
@@ -281,6 +324,7 @@ fn hints(screen: i32, family: Family) -> Vec<Hint> {
             ),
             (vec![key(family.confirm())], gettext_noop!("Open")),
             (shoulders, gettext_noop!("Change list")),
+            (vec![key(Button::West)], gettext_noop!("Surprise me")),
             (vec![key(Button::Start)], gettext_noop!("Settings")),
         ],
         SCREEN_GAME => vec![
@@ -289,7 +333,14 @@ fn hints(screen: i32, family: Family) -> Vec<Hint> {
                 gettext_noop!("Move"),
             ),
             (vec![key(family.confirm())], gettext_noop!("Select")),
-            (shoulders, gettext_noop!("Scroll")),
+            (
+                shoulders,
+                match menu {
+                    Some(Menu::Versions) => gettext_noop!("Change version"),
+                    Some(Menu::Files) => gettext_noop!("Change file"),
+                    None => gettext_noop!("Scroll"),
+                },
+            ),
             (vec![key(Button::North)], gettext_noop!("Favorite")),
             (vec![key(family.back())], gettext_noop!("Back")),
         ],
@@ -599,17 +650,36 @@ mod tests {
 
     #[test]
     fn hints_name_the_buttons_of_the_controller_in_use() {
-        let library = hints(SCREEN_LIBRARY, Family::Xbox);
+        let library = hints(SCREEN_LIBRARY, Family::Xbox, None);
         assert_eq!(library[1], (vec![Badge::Text("A")], "Open"));
         assert_eq!(
             library[2],
             (vec![Badge::Text("LB"), Badge::Text("RB")], "Change list")
         );
-        let game = hints(SCREEN_GAME, Family::Ps5);
+        assert_eq!(library[3], (vec![Badge::Text("X")], "Surprise me"));
+        let game = hints(SCREEN_GAME, Family::Ps5, None);
         assert_eq!(game[1], (vec![Badge::Shape(Shape::Cross)], "Select"));
+        assert_eq!(game[2].1, "Scroll");
         assert_eq!(game[4], (vec![Badge::Shape(Shape::Circle)], "Back"));
-        let settings = hints(SCREEN_SETTINGS, Family::Nintendo);
+        let versioned = hints(SCREEN_GAME, Family::Xbox, Some(Menu::Versions));
+        assert_eq!(
+            versioned[2],
+            (vec![Badge::Text("LB"), Badge::Text("RB")], "Change version")
+        );
+        let files = hints(SCREEN_GAME, Family::Xbox, Some(Menu::Files));
+        assert_eq!(files[2].1, "Change file");
+        let settings = hints(SCREEN_SETTINGS, Family::Nintendo, None);
         assert_eq!(settings[3], (vec![Badge::Text("B")], "Back"));
+    }
+
+    #[test]
+    fn shoulder_buttons_step_through_versions_and_stop_at_the_ends() {
+        assert_eq!(version_step(L, 1, 3), Some(0));
+        assert_eq!(version_step(R, 1, 3), Some(2));
+        assert_eq!(version_step(L, 0, 3), Some(0));
+        assert_eq!(version_step(R, 2, 3), Some(2));
+        assert_eq!(version_step(R, 0, 1), None);
+        assert_eq!(version_step(R, 0, 0), None);
     }
 
     #[test]

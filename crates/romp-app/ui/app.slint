@@ -2,11 +2,13 @@ import { ListView, Locale, Row, ScrollView, Theme } from "theme.slint";
 import { Button, CheckBox, ComboBox, FocusRing, KeyActivator, LineEdit, Slider, Switch } from "focus.slint";
 import { AchievementItem, AchievementRow } from "achievements.slint";
 import { SlotCard, SlotPicture } from "slots.slint";
-import { ProgressIndicator, Spinner } from "std-widgets.slint";
+import { Palette, ProgressIndicator, Spinner } from "std-widgets.slint";
 
 export struct SidebarEntry { header: bool, key: string, name: string, initial: string, count: int, icon: image, has-icon: bool, glyph: string, expanded: bool, can-add: bool, editable: bool, note: bool }
 export struct NotificationRow { id: int, title: string, body: string, level: string, when: string, unread: bool }
 export struct Membership { key: string, name: string, member: bool }
+export struct StatusOption { label: string, checked: bool }
+export struct NoteSection { title: string, items: [string] }
 export struct DeviceRow { key: string, name: string, detail: string, player: int, active: bool }
 export struct StorageRow { label: string, size: string }
 export struct LicenseRow { name: string, license: string, url: string }
@@ -18,7 +20,7 @@ export struct KeyHint { keys: string, action: string }
 export struct PadKey { text: string, shape: string }
 export struct PadHint { keys: [PadKey], action: string }
 export struct RemapRow { name: string, binding: string, waiting: bool }
-export struct GameCard { id: int, title: string, platform: string, cover: image, has-cover: bool, downloaded: bool, focused: bool, favorite: bool, aspect: float }
+export struct GameCard { id: int, title: string, platform: string, cover: image, has-cover: bool, downloaded: bool, focused: bool, favorite: bool, versions: int, aspect: float }
 export struct GameRow { cards: [GameCard], shelf: float }
 export struct Fact { label: string, value: string }
 export struct Shot { image: image, loaded: bool }
@@ -411,6 +413,102 @@ component Avatar inherits Rectangle {
     }
 }
 
+component VersionRow inherits Rectangle {
+    in property <string> text;
+    in property <bool> current;
+    callback clicked();
+    min-height: 32px;
+    border-radius: Theme.radius;
+    background: touch.pressed ? Theme.pressed : root.current ? Theme.accent-soft : touch.has-hover ? Theme.hover : transparent;
+    animate background { duration: 100ms; }
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-action-default => { root.clicked(); }
+    touch := TouchArea { clicked => { root.clicked(); } }
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        Text {
+            horizontal-alignment: Locale.start;
+            vertical-alignment: center;
+            text: root.text;
+            overflow: elide;
+            font-weight: root.current ? 600 : 400;
+            color: Theme.text-strong;
+        }
+    }
+}
+
+/// A button showing the current choice that opens a menu of the others. Long menus scroll.
+component Dropdown inherits Rectangle {
+    in property <[string]> labels;
+    in property <int> index;
+    callback chosen(int);
+    width: label.preferred-width;
+    Button {
+        width: parent.width;
+        height: parent.height;
+        accessible-role: button;
+        accessible-label: root.labels[root.index];
+        clicked => { popup.show(); }
+    }
+    label := HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        spacing: 8px;
+        Text {
+            vertical-alignment: center;
+            text: root.labels[root.index];
+            color: Palette.control-foreground;
+            accessible-role: none;
+        }
+        Path {
+            y: (parent.height - self.height) / 2;
+            width: 8px;
+            height: 5px;
+            commands: "M 0 0 L 8 0 L 4 5 Z";
+            fill: Palette.control-foreground;
+        }
+    }
+    popup := PopupWindow {
+        y: parent.height + 4px;
+        width: clamp(list.preferred-width, 260px, 420px);
+        height: min(list.preferred-height, 360px);
+        close-policy: close-on-click-outside;
+        Rectangle {
+            width: parent.width;
+            height: parent.height;
+            background: Theme.surface-raised;
+            border-radius: 8px;
+            border-width: 1px;
+            border-color: Theme.surface-selected;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: Theme.shadow;
+            ScrollView {
+                width: parent.width;
+                height: parent.height;
+                // Opens with the current choice in view.
+                init => {
+                    self.content-y = -clamp(root.index * 34px, 0px, max(0px, list.preferred-height - self.visible-height));
+                }
+                list := VerticalLayout {
+                    width: parent.width;
+                    padding: 12px;
+                    spacing: 2px;
+                    for entry[i] in root.labels: VersionRow {
+                        text: entry;
+                        current: i == root.index;
+                        clicked => {
+                            root.chosen(i);
+                            popup.close();
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 component SidebarItem inherits Rectangle {
     in property <bool> focus-enabled: true;
     in property <string> label;
@@ -587,6 +685,17 @@ component Card inherits Rectangle {
                     background: Theme.success;
                     Text { horizontal-alignment: Locale.start; text: "✓"; color: Theme.text-strong; font-weight: 700; }
                 }
+                if root.game.versions > 1: Rectangle {
+                    x: Locale.rtl ? 8px : parent.width - self.width - 8px;
+                    y: parent.height - self.height - 8px;
+                    width: versions-text.preferred-width + 12px;
+                    height: 20px;
+                    border-radius: 10px;
+                    background: Theme.scrim;
+                    accessible-role: text;
+                    accessible-label: @tr("{n} version" | "{n} versions" % root.game.versions);
+                    versions-text := Text { horizontal-alignment: center; text: @tr("{n} version" | "{n} versions" % root.game.versions); color: Theme.text-strong; font-size: Theme.font-caption; font-weight: 600; }
+                }
                 if touch.has-hover: Rectangle { background: Theme.hover; }
                 if root.game.focused || keys.has-focus: FocusRing {
                     x: 4px; y: 4px;
@@ -689,7 +798,12 @@ component Library inherits Rectangle {
     callback open-about();
     in property <bool> page-open;
     public function focus-search() { search-field.focus(); }
-    in property <bool> compact;
+    // A narrow window always shows the sidebar as a rail of icons; a wider one as the player left it.
+    in property <bool> narrow;
+    in-out property <length> sidebar-width: 248px;
+    in-out property <bool> sidebar-collapsed;
+    property <bool> compact: root.narrow || root.sidebar-collapsed;
+    property <bool> resizing;
     in property <image> user-avatar;
     in property <bool> has-user-avatar;
     in property <string> user-initial;
@@ -710,6 +824,7 @@ component Library inherits Rectangle {
     callback columns-changed(int);
     callback row-shown(int);
     callback refresh();
+    callback surprise-me();
     callback open-settings();
     callback open-game(int);
     in property <bool> needs-pairing;
@@ -770,9 +885,9 @@ component Library inherits Rectangle {
     }
 
     Row {
-        Rectangle {
-            width: root.compact ? 64px : 248px;
-            animate width { duration: 150ms; easing: ease-out; }
+        sidebar-pane := Rectangle {
+            width: root.compact ? 64px : root.sidebar-width;
+            animate width { duration: root.resizing ? 0ms : 150ms; easing: ease-out; }
             background: Theme.sidebar;
             Rectangle {
                 x: Locale.rtl ? 0 : parent.width - 1px;
@@ -993,6 +1108,22 @@ component Library inherits Rectangle {
                 }
 
             }
+            // Dragged past halfway to the rail, the sidebar snaps to it, and back out of it the same way.
+            if !root.narrow: TouchArea {
+                x: Locale.rtl ? 0 : parent.width - self.width;
+                width: 6px;
+                mouse-cursor: ew-resize;
+                changed pressed => { root.resizing = self.pressed; }
+                moved => {
+                    if self.pressed {
+                        let wanted = sidebar-pane.width + (Locale.rtl ? self.pressed-x - self.mouse-x : self.mouse-x - self.pressed-x);
+                        root.sidebar-collapsed = wanted < (64px + 200px) / 2;
+                        if !root.sidebar-collapsed {
+                            root.sidebar-width = clamp(wanted, 200px, 400px);
+                        }
+                    }
+                }
+            }
         }
         Rectangle {
             horizontal-stretch: 1;
@@ -1116,6 +1247,15 @@ component Library inherits Rectangle {
                         }
                         VerticalLayout {
                             alignment: center;
+                            IconButton {
+                                icon: @image-url("icons/dice.svg");
+                                tooltip: @tr("Surprise me: open a random game from this list");
+                                enabled: root.rows.length > 0;
+                                clicked => { root.surprise-me(); }
+                            }
+                        }
+                        VerticalLayout {
+                            alignment: center;
                             if root.syncing: Spinner { indeterminate: true; width: 20px; height: 20px; }
                             if !root.syncing: IconButton { icon: @image-url("icons/refresh.svg"); tooltip: @tr("Refresh library"); clicked => { root.refresh(); } }
                         }
@@ -1213,9 +1353,9 @@ component Library inherits Rectangle {
         }
         TouchArea { clicked => { root.notifications-open = false; } }
         Rectangle {
-            x: Locale.rtl ? parent.width - self.width - (root.compact ? 72px : 256px) : (root.compact ? 72px : 256px);
+            x: Locale.rtl ? parent.width - self.width - sidebar-pane.width - 8px : sidebar-pane.width + 8px;
             y: parent.height - self.height - 12px;
-            width: min(360px, parent.width - (root.compact ? 88px : 272px));
+            width: min(360px, parent.width - sidebar-pane.width - 24px);
             height: min(460px, parent.height - 24px);
             border-radius: Theme.radius-large;
             background: Theme.surface-raised;
@@ -1428,6 +1568,17 @@ component GamePage inherits FocusScope {
     callback toggle-favorite();
     callback toggle-membership(string, bool);
     callback new-collection();
+    in property <bool> show-status;
+    in property <bool> can-edit-status;
+    in property <string> status-label;
+    in property <[StatusOption]> status-options;
+    callback toggle-status(int, bool);
+    in property <[string]> versions;
+    in property <int> version-index;
+    callback choose-version(int);
+    in property <[string]> files;
+    in property <int> file-index;
+    callback choose-file(int);
 
     in-out property <length> scroll-y <=> page.content-y;
     changed scroll-y => {
@@ -1605,6 +1756,56 @@ component GamePage inherits FocusScope {
                                         }
                                     }
                                 }
+                            }
+                            if root.show-status: Rectangle {
+                                width: status-button.preferred-width;
+                                status-button := Button {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    text: root.status-label;
+                                    enabled: root.can-edit-status;
+                                    clicked => { status-popup.show(); }
+                                }
+                                status-popup := PopupWindow {
+                                    y: parent.height + 4px;
+                                    width: 220px;
+                                    height: status-list.preferred-height;
+                                    close-policy: close-on-click-outside;
+                                    Rectangle {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        background: Theme.surface-raised;
+                                        border-radius: 8px;
+                                        border-width: 1px;
+                                        border-color: Theme.surface-selected;
+                                        drop-shadow-blur: 12px;
+                                        drop-shadow-color: Theme.shadow;
+                                        status-list := VerticalLayout {
+                                            width: parent.width;
+                                            padding: 12px;
+                                            spacing: 6px;
+                                            for option[i] in root.status-options: VerticalLayout {
+                                                spacing: 6px;
+                                                if i == 2: Rectangle { height: 1px; background: Theme.surface-selected; }
+                                                CheckBox {
+                                                    text: option.label;
+                                                    checked: option.checked;
+                                                    toggled => { root.toggle-status(i, self.checked); }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if root.versions.length > 1: Dropdown {
+                                labels: root.versions;
+                                index: root.version-index;
+                                chosen(i) => { root.choose-version(i); }
+                            }
+                            if root.files.length > 1: Dropdown {
+                                labels: root.files;
+                                index: root.file-index;
+                                chosen(i) => { root.choose-file(i); }
                             }
                         }
                         if root.status != "": Text { horizontal-alignment: Locale.start; text: root.status; color: Theme.text-secondary; wrap: word-wrap; }
@@ -2482,6 +2683,110 @@ component AboutFact inherits Text {
 }
 
 
+component WhatsNewDialog inherits Rectangle {
+    in property <string> version;
+    in property <[NoteSection]> notes;
+    in-out property <bool> show-after-updates;
+    callback show-after-updates-toggled(bool);
+    callback open-changelog();
+    callback close();
+    background: Theme.scrim;
+    TouchArea { clicked => { root.close(); } }
+    FocusScope {
+        init => { self.focus(); }
+        key-pressed(event) => {
+            if event.text == Key.Escape {
+                root.close();
+                return accept;
+            }
+            return reject;
+        }
+    }
+    Rectangle {
+        width: min(480px, parent.width - 32px);
+        height: min(540px, parent.height - 32px);
+        x: (parent.width - self.width) / 2;
+        y: (parent.height - self.height) / 2;
+        background: Theme.surface;
+        border-radius: 16px;
+        border-width: 1px;
+        border-color: Theme.border;
+        drop-shadow-blur: 30px;
+        drop-shadow-color: Theme.shadow;
+        clip: true;
+        TouchArea { }
+        VerticalLayout {
+            padding: 24px;
+            spacing: 16px;
+            Text {
+                horizontal-alignment: Locale.start;
+                text: @tr("What’s new in Romlin {}", root.version);
+                font-size: Theme.font-title;
+                font-weight: 800;
+                color: Theme.text-strong;
+                wrap: word-wrap;
+            }
+            ScrollView {
+                vertical-stretch: 1;
+                content-width: self.visible-width;
+                content-height: note-list.preferred-height;
+                note-list := VerticalLayout {
+                    width: parent.width;
+                    padding-right: 12px;
+                    spacing: 18px;
+                    for section in root.notes: VerticalLayout {
+                        spacing: 8px;
+                        Text {
+                            horizontal-alignment: Locale.start;
+                            text: section.title;
+                            font-size: Theme.font-subtitle;
+                            font-weight: 700;
+                            color: Theme.text-strong;
+                        }
+                        // The text gets its width before its height is measured, so long notes
+                        // wrap into the height the list scrolls by.
+                        for item in section.items: Rectangle {
+                            height: note-text.preferred-height;
+                            Text {
+                                x: Locale.rtl ? parent.width - self.width : 0;
+                                y: 0;
+                                text: "•";
+                                font-size: Theme.font-body-large;
+                                color: Theme.text-muted;
+                            }
+                            note-text := Text {
+                                x: Locale.rtl ? 0 : 16px;
+                                y: 0;
+                                width: parent.width - 16px;
+                                horizontal-alignment: Locale.start;
+                                text: item;
+                                font-size: Theme.font-body-large;
+                                color: Theme.text;
+                                wrap: word-wrap;
+                                line-height-factor: 1.2;
+                            }
+                        }
+                    }
+                }
+            }
+            Row {
+                alignment: start;
+                LinkButton { text: @tr("Full changelog"); clicked => { root.open-changelog(); } }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                CheckBox {
+                    text: @tr("Show this after updates");
+                    checked <=> root.show-after-updates;
+                    toggled => { root.show-after-updates-toggled(self.checked); }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Button { text: @tr("Close"); primary: true; clicked => { root.close(); } }
+            }
+        }
+    }
+}
+
 component AboutDialog inherits Rectangle {
     in property <string> version;
     in property <string> update-version;
@@ -2495,6 +2800,7 @@ component AboutDialog inherits Rectangle {
     callback open-link(string);
     callback show-log();
     callback copy-log();
+    callback open-whats-new();
     in property <string> log-note;
     background: Theme.scrim;
     TouchArea { clicked => { root.close(); } }
@@ -2543,6 +2849,10 @@ component AboutDialog inherits Rectangle {
                 Text { text: Brand.name; font-size: Theme.font-heading; font-weight: 800; color: Theme.text-strong; horizontal-alignment: center; }
                 Rectangle { height: 4px; }
                 Text { text: @tr("Version {}", root.version); font-size: Theme.font-small; color: Theme.text-muted; horizontal-alignment: center; }
+                Row {
+                    alignment: center;
+                    LinkButton { text: @tr("What’s new"); clicked => { root.open-whats-new(); } }
+                }
                 if root.update-version != "": Row {
                     alignment: center;
                     LinkButton { text: @tr("Version {} is available", root.update-version); clicked => { root.open-update(); } }
@@ -2571,7 +2881,7 @@ component AboutDialog inherits Rectangle {
                 VerticalLayout {
                     spacing: 6px;
                     AboutFact { text: @tr("Games and saves come from your RomM server."); }
-                    AboutFact { text: @tr("Emulation by libretro cores and xemu."); }
+                    AboutFact { text: @tr("Emulation by libretro cores, xemu and RPCS3."); }
                     AboutFact { text: @tr("Free software under the GNU GPL, version 3 or later."); }
                 }
                 Rectangle { height: 14px; }
@@ -2660,6 +2970,8 @@ export component AppWindow inherits Window {
     in property <bool> first-run;
     property <bool> in-library: root.screen >= 2 && root.screen <= 4;
     property <bool> narrow;
+    in-out property <length> sidebar-width <=> library.sidebar-width;
+    in-out property <bool> sidebar-collapsed <=> library.sidebar-collapsed;
     changed width => { self.narrow = self.width < 1000px; }
     init => { self.narrow = self.width < 1000px; }
 
@@ -2690,6 +3002,12 @@ export component AppWindow inherits Window {
     in property <bool> has-app-icon: true;
     in property <string> app-version;
     in-out property <bool> about-open;
+    in-out property <bool> whats-new-open;
+    in property <string> whats-new-version;
+    in property <[NoteSection]> whats-new-notes;
+    in-out property <bool> whats-new-after-updates;
+    callback open-whats-new();
+    callback whats-new-after-updates-toggled(bool);
     callback open-url(string);
     callback sign-out();
     callback open-settings();
@@ -2770,6 +3088,7 @@ export component AppWindow inherits Window {
     callback columns-changed(int);
     callback row-shown(int);
     callback refresh();
+    callback surprise-me();
     callback open-game(int);
 
     in property <string> game-title;
@@ -2850,6 +3169,17 @@ export component AppWindow inherits Window {
     callback toggle-favorite();
     callback toggle-membership(string, bool);
     callback new-collection-with-game();
+    in property <bool> show-status;
+    in property <bool> can-edit-status;
+    in property <string> game-status-label;
+    in property <[StatusOption]> game-status-options;
+    callback toggle-status(int, bool);
+    in property <[string]> game-versions;
+    in property <int> game-version-index;
+    callback choose-game-version(int);
+    in property <[string]> game-files;
+    in property <int> game-file-index;
+    callback choose-game-file(int);
     in property <int> grid-focus-row: -1;
     in-out property <length> grid-scroll <=> library.scroll-y;
     in property <float> grid-focus-top;
@@ -2946,7 +3276,7 @@ export component AppWindow inherits Window {
     }
     library := Library {
         visible: root.in-library;
-        compact: root.narrow;
+        narrow: root.narrow;
         page-open: root.screen == 3 || root.screen == 4;
         user-label: root.user-label;
         sidebar: root.sidebar;
@@ -2966,6 +3296,7 @@ export component AppWindow inherits Window {
         columns-changed(n) => { root.columns-changed(n); }
         row-shown(i) => { root.row-shown(i); }
         refresh => { root.refresh(); }
+        surprise-me => { root.surprise-me(); }
         open-game(id) => { root.open-game(id); }
         needs-pairing: root.needs-pairing;
         pair-prompt: root.pair-prompt;
@@ -3071,6 +3402,17 @@ export component AppWindow inherits Window {
             toggle-favorite => { root.toggle-favorite(); }
             toggle-membership(key, on) => { root.toggle-membership(key, on); }
             new-collection => { root.new-collection-with-game(); }
+            show-status: root.show-status;
+            can-edit-status: root.can-edit-status;
+            status-label: root.game-status-label;
+            status-options: root.game-status-options;
+            toggle-status(index, on) => { root.toggle-status(index, on); }
+            versions: root.game-versions;
+            version-index: root.game-version-index;
+            choose-version(index) => { root.choose-game-version(index); }
+            files: root.game-files;
+            file-index: root.game-file-index;
+            choose-file(index) => { root.choose-game-file(index); }
         }
         if root.screen == 4: SettingsPage {
             modal-open: root.dialog-open || root.remap-open || root.about-open;
@@ -3175,7 +3517,16 @@ export component AppWindow inherits Window {
         open-link(url) => { root.open-url(url); }
         show-log => { root.show-log(); }
         copy-log => { root.copy-log(); }
+        open-whats-new => { root.open-whats-new(); }
         log-note: root.about-log-note;
+    }
+    if root.whats-new-open: WhatsNewDialog {
+        version: root.whats-new-version;
+        notes: root.whats-new-notes;
+        show-after-updates <=> root.whats-new-after-updates;
+        show-after-updates-toggled(on) => { root.whats-new-after-updates-toggled(on); }
+        open-changelog => { root.open-url("https://github.com/romlin-emu/romlin/blob/main/CHANGELOG.md"); }
+        close => { root.whats-new-open = false; }
     }
     if root.dialog-open: Dialog {
         title: root.dialog-title;

@@ -93,11 +93,12 @@ const {ReleasePleaseManifest} = require('release-please/build/src/updaters/relea
   const directory = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'romlin-nightly-'));
   try {
     const log = path.join(directory, 'calls');
+    fs.writeFileSync(path.join(directory, 'changelog.md'), 'changelog\n');
     fs.writeFileSync(path.join(directory, 'gh'), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$GH_CALLS"\nif [ "$1" = api ]; then\n  [ "$TEST_HEAD" != fail ] || exit 1\n  printf "%s\\n" "$TEST_HEAD"\nfi\n', {mode: 0o755});
     const script = nightly.jobs.publish.steps.find(step => step.name === 'Replace the nightly release').run;
     for (const head of ['a'.repeat(40), 'b'.repeat(40), 'fail']) {
       fs.writeFileSync(log, '');
-      const result = cp.spawnSync('bash', ['-e', '-o', 'pipefail', '-c', script], {encoding: 'utf8', env: {
+      const result = cp.spawnSync('bash', ['-e', '-o', 'pipefail', '-c', script], {encoding: 'utf8', cwd: directory, env: {
         ...process.env, PATH: directory + path.delimiter + process.env.PATH,
         GH_REPO: 'romlin-emu/romlin', GH_CALLS: log, TEST_HEAD: head, GITHUB_SHA: 'a'.repeat(40),
       }});
