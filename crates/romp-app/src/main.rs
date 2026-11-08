@@ -60,6 +60,7 @@ mod textures;
 mod updates;
 mod versions;
 mod vulkan;
+mod whats_new;
 mod xemu;
 
 use anyhow::Context;
