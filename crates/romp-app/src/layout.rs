@@ -104,10 +104,20 @@ pub fn launch_target(rom: &RomDetail, files: &[(PathBuf, u64)]) -> Option<Launch
         found.sort_by_cached_key(|p| (disc_number(p).unwrap_or(u32::MAX), p.clone()));
         Some(found)
     };
+    // A disc beside the game's folder wins over one in a sub-folder, such as a translation.
+    let disc_depth = files
+        .iter()
+        .map(|(p, _)| p)
+        .filter(|p| DISC_ORDER.contains(&ext(p).as_str()))
+        .map(&depth)
+        .min();
     for wanted in DISC_ORDER {
         let Some(mut found) = shallowest_of(wanted) else {
             continue;
         };
+        if found.first().map(depth) != disc_depth {
+            continue;
+        }
         if found.len() == 1 || wanted == "m3u" {
             return Some(Launch::File(found.swap_remove(0)));
         }
@@ -146,24 +156,38 @@ const NOT_PLAYABLE: [&str; 6] = [
     "cheat",
 ];
 
-/// The files a player can choose to start a multi-file game with, such as a folder of hacks of
-/// one game, the one RomP starts by itself first; or nothing when RomP starts the whole set
-/// itself: discs, a playlist, a PS3 game.
+/// Disc sheets, which start a disc made of the track files beside them.
+const SHEETS: [&str; 4] = ["cue", "gdi", "ccd", "mds"];
+const TRACKS: [&str; 4] = ["bin", "img", "raw", "sub"];
+
+fn folder(p: &Path) -> &Path {
+    p.parent().unwrap_or(Path::new(""))
+}
+
+/// Whether `p` is a track of a disc whose sheet is among `files`, so it doesn't start alone.
+fn is_track(p: &Path, files: &[PlannedFile]) -> bool {
+    TRACKS.contains(&ext(p).as_str())
+        && files.iter().any(|f| {
+            folder(&f.rel_path) == folder(p) && SHEETS.contains(&ext(&f.rel_path).as_str())
+        })
+}
+
+/// The files a player can choose to start a multi-file game with, such as a game with its
+/// translations or a folder of hacks of one game, the one RomP starts by itself first; or
+/// nothing when RomP starts the whole set itself: several discs, a PS3 game.
 pub fn file_choices(rom: &RomDetail, files: &[PlannedFile]) -> Vec<PathBuf> {
-    if !rom.has_multiple_files {
+    // RomM counts only the files at the top of a game's folder as multiple, so a game with
+    // translations or hacks in sub-folders is still worth looking through.
+    if files.len() < 2 || rom.platform_slug == crate::rpcs3::PLATFORM {
         return Vec::new();
     }
     let sized: Vec<(PathBuf, u64)> = files
         .iter()
         .map(|f| (f.rel_path.clone(), f.file.file_size_bytes.max(0) as u64))
         .collect();
-    let automatic = match launch_target(rom, &sized) {
-        Some(Launch::File(path)) if !DISC_ORDER.contains(&ext(&path).as_str()) => path,
-        _ => return Vec::new(),
-    };
-    if rom.platform_slug == crate::rpcs3::PLATFORM {
+    let Some(Launch::File(automatic)) = launch_target(rom, &sized) else {
         return Vec::new();
-    }
+    };
     let mut choices: Vec<PathBuf> = files
         .iter()
         .filter(|f| {
@@ -173,13 +197,26 @@ pub fn file_choices(rom: &RomDetail, files: &[PlannedFile]) -> Vec<PathBuf> {
                 .is_none_or(|c| !NOT_PLAYABLE.contains(&c))
         })
         .map(|f| f.rel_path.clone())
-        .filter(|p| !is_extra(p))
+        .filter(|p| !is_extra(p) && ext(p) != "m3u" && !is_track(p, files))
         .collect();
     if choices.len() < 2 {
         return Vec::new();
     }
     choices.sort_by_cached_key(|p| (*p != automatic, p.to_string_lossy().to_lowercase()));
     choices
+}
+
+/// The files that starting with `pick` needs: it, and the tracks beside it when it's a sheet.
+pub fn files_for(pick: &Path, files: &[PlannedFile]) -> Vec<PathBuf> {
+    let sheet = SHEETS.contains(&ext(pick).as_str());
+    files
+        .iter()
+        .map(|f| &f.rel_path)
+        .filter(|p| {
+            *p == pick || (sheet && folder(p) == folder(pick) && TRACKS.contains(&ext(p).as_str()))
+        })
+        .cloned()
+        .collect()
 }
 
 fn playlist(stem: &str, discs: Vec<PathBuf>) -> Launch {
@@ -296,6 +333,68 @@ mod tests {
     }
 
     #[test]
+    fn a_disc_offers_its_translations() {
+        let dir = "roms/snes/Super Metroid";
+        let translations = format!("{dir}/translation");
+        assert_eq!(
+            choices(vec![
+                file(1, dir, "Tales (Japan).chd"),
+                file(2, &translations, "Tales (T-En).chd"),
+                file(3, &translations, "Tales (T-En 2).cue"),
+                file(4, &translations, "Tales (T-En 2) (Track 1).bin"),
+            ]),
+            [
+                PathBuf::from("Tales (Japan).chd"),
+                PathBuf::from("translation/Tales (T-En 2).cue"),
+                PathBuf::from("translation/Tales (T-En).chd"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_game_with_one_file_on_top_offers_those_in_its_sub_folders() {
+        let dir = "roms/psx/Tales";
+        let r = rom(
+            false,
+            vec![
+                file(1, dir, "Tales (Japan).chd"),
+                file(2, &format!("{dir}/translation"), "Tales (T-En).chd"),
+            ],
+        );
+        let names: Vec<_> = file_choices(&r, &plan(&r).unwrap())
+            .iter()
+            .map(|p| p.file_name().unwrap().to_owned())
+            .collect();
+        assert_eq!(names, ["Tales (Japan).chd", "Tales (T-En).chd"]);
+    }
+
+    #[test]
+    fn a_sheet_comes_down_with_its_tracks() {
+        let dir = "roms/snes/Super Metroid";
+        let translations = format!("{dir}/translation");
+        let mut r = rom(
+            true,
+            vec![
+                file(1, dir, "Tales (Japan).chd"),
+                file(2, &translations, "Tales (T-En).cue"),
+                file(3, &translations, "Tales (T-En) (Track 1).bin"),
+                file(4, &translations, "Tales (T-En) (Track 2).bin"),
+            ],
+        );
+        r.fs_path = "roms/snes".into();
+        r.fs_name = "Super Metroid".into();
+        let planned = plan(&r).unwrap();
+        assert_eq!(
+            files_for(Path::new("translation/Tales (T-En).cue"), &planned).len(),
+            3
+        );
+        assert_eq!(
+            files_for(Path::new("Tales (Japan).chd"), &planned),
+            [PathBuf::from("Tales (Japan).chd")]
+        );
+    }
+
+    #[test]
     fn discs_and_lone_games_offer_no_choice() {
         let dir = "roms/snes/Super Metroid";
         assert!(choices(vec![
@@ -307,6 +406,20 @@ mod tests {
         assert!(choices(vec![file(1, dir, "Game.smc"), file(2, dir, "readme.txt")]).is_empty());
         let r = rom(false, vec![file(1, "roms/snes", "Game.smc")]);
         assert!(file_choices(&r, &plan(&r).unwrap()).is_empty());
+    }
+
+    #[test]
+    fn a_disc_beside_the_game_starts_before_one_in_a_sub_folder() {
+        let r = rom(true, Vec::new());
+        let files = sized(&[
+            PathBuf::from("Tales (Japan).chd"),
+            PathBuf::from("translation/Tales (T-En).cue"),
+            PathBuf::from("translation/Tales (T-En) (Track 1).bin"),
+        ]);
+        assert_eq!(
+            launch_target(&r, &files),
+            Some(Launch::File(PathBuf::from("Tales (Japan).chd")))
+        );
     }
 
     #[test]
