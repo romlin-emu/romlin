@@ -1,6 +1,7 @@
 mod achievements;
 mod activity;
 mod collections;
+mod fullscreen;
 mod game;
 mod installs;
 mod navigation;
@@ -25,6 +26,7 @@ use crate::romm::types::{DeviceAuth, PollOutcome, User};
 use crate::store::{GameFilter, GameItem, SortOrder, Store};
 use crate::sync::{sync_library, SyncReport, PAGE_SIZE};
 use crate::{identity, paths, qr, AppWindow, GameCard, GameRow};
+pub(crate) use collections::RECENT_KEY;
 use slint::{
     ComponentHandle, Image, Model, ModelRc, Rgba8Pixel, SharedPixelBuffer, Timer, TimerMode,
     VecModel, Weak,
@@ -147,6 +149,9 @@ struct Controller {
     remap_device: RefCell<Option<String>>,
     remap_waiting: Cell<Option<u32>>,
     nav_card: Cell<Option<usize>>,
+    fullscreen: Cell<crate::fullscreen::Mode>,
+    /// Columns the library window's grid fits; fullscreen mode uses its layout's instead.
+    grid_columns: Cell<usize>,
     nav_repeat: RefCell<crate::navigation::Repeater>,
     pad_hints: RefCell<Vec<navigation::Hint>>,
     nav_timer: RefCell<Option<Timer>>,
@@ -264,6 +269,8 @@ pub fn run(game_mode: bool) -> anyhow::Result<()> {
         remap_device: RefCell::new(None),
         remap_waiting: Cell::new(None),
         nav_card: Cell::new(None),
+        fullscreen: Cell::default(),
+        grid_columns: Cell::new(1),
         nav_repeat: RefCell::default(),
         pad_hints: RefCell::default(),
         nav_timer: RefCell::new(None),
@@ -415,10 +422,25 @@ impl Controller {
         ui.on_row_shown(|i| with_controller(|c| c.row_shown(i.max(0) as usize)));
         ui.on_refresh(|| with_controller(|c| c.sync()));
         ui.on_surprise_me(|| with_controller(|c| c.surprise()));
+        ui.on_fullscreen_exit(|| with_controller(|c| c.toggle_fullscreen_mode()));
+        ui.on_fullscreen_move(|delta| with_controller(|c| c.move_fullscreen_row(delta)));
+        ui.on_fullscreen_tab_step(|delta| with_controller(|c| c.step_fullscreen_tab(delta)));
+        ui.on_fullscreen_tab_chosen(|i| {
+            with_controller(|c| c.choose_fullscreen_tab(crate::fullscreen::Tab::from_index(i)));
+        });
+        ui.on_fullscreen_focus(|i| {
+            with_controller(|c| c.focus_card(usize::try_from(i).ok()));
+        });
+        ui.on_fullscreen_play(|| with_controller(|c| c.play_focused()));
         ui.on_open_game(|id| with_controller(|c| c.open_game(i64::from(id))));
         ui.on_back_to_library(|| with_controller(|c| c.back_to_library()));
         crate::mouse::on_back_button(|id| with_controller(|c| c.mouse_back(id)));
         crate::mouse::on_exit(|| with_controller(|c| c.save_session()));
+        crate::mouse::on_fullscreen_key(|id| {
+            let mut handled = false;
+            with_controller(|c| handled = c.fullscreen_key(id));
+            handled
+        });
         ui.on_download_game(|| with_controller(|c| c.download_game()));
         ui.on_cancel_download(|| with_controller(|c| c.cancel_download()));
         ui.on_play_game(|| with_controller(|c| c.play_game()));
@@ -893,7 +915,16 @@ impl Controller {
     }
 
     fn set_columns(&self, columns: i32) {
-        let columns = columns.max(1) as usize;
+        self.grid_columns.set(columns.max(1) as usize);
+        self.apply_columns();
+    }
+
+    fn apply_columns(&self) {
+        let columns = if self.fullscreen.get().active() {
+            self.prefs.get().game_list_layout.columns
+        } else {
+            self.grid_columns.get()
+        };
         if self.library.borrow().columns == columns {
             return;
         }

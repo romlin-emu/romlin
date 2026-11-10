@@ -1,0 +1,145 @@
+import { Locale, ListView, Theme } from "theme.slint";
+
+export struct GameCard { id: int, title: string, platform: string, cover: image, has-cover: bool, downloaded: bool, focused: bool, favorite: bool, versions: int, aspect: float }
+export struct GameRow { cards: [GameCard], shelf: float }
+
+// Game list layouts for fullscreen mode. Every layout takes the same properties and callbacks, so
+// `FullscreenView` (app.slint) can show any of them; register a new one beside its entry in
+// `src/fullscreen.rs`. A layout shows one game per `rows` entry, as that entry's `columns` allow.
+
+// The games as a scrolling list, with the focused game's cover and details beside it.
+export component ListDetailLayout inherits Rectangle {
+    in property <[GameRow]> rows;
+    in property <int> focus-row: -1;
+    in property <string> empty-text;
+    callback row-shown(int);
+    callback choose-row(int);
+    callback play();
+
+    property <length> row-height: 44px;
+    property <bool> has-game: root.focus-row >= 0 && root.focus-row < root.rows.length;
+    property <GameCard> game: root.rows[root.focus-row].cards[0];
+
+    if root.rows.length == 0: Text {
+        text: root.empty-text;
+        color: Theme.text-muted;
+        font-size: Theme.font-subtitle;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    if root.rows.length > 0: HorizontalLayout {
+        padding-left: 32px;
+        padding-right: 32px;
+        spacing: 32px;
+        list := ListView {
+            width: max(280px, root.width * 0.38);
+            // Keeps the focused row in view.
+            property <int> focus-row: root.focus-row;
+            changed focus-row => {
+                if self.focus-row >= 0 {
+                    if self.focus-row * root.row-height < -self.content-y {
+                        self.content-y = -self.focus-row * root.row-height;
+                    }
+                    if (self.focus-row + 1) * root.row-height > -self.content-y + self.visible-height {
+                        self.content-y = -((self.focus-row + 1) * root.row-height - self.visible-height);
+                    }
+                }
+            }
+            for row[i] in root.rows: Rectangle {
+                property <int> index: i;
+                property <GameCard> card: row.cards[0];
+                height: root.row-height;
+                border-radius: Theme.radius;
+                background: i == root.focus-row ? Theme.accent : touch.has-hover ? Theme.hover : transparent;
+                accessible-role: button;
+                accessible-label: card.title;
+                accessible-description: card.platform + (card.downloaded ? ", " + @tr("downloaded") : "") + (card.favorite ? ", " + @tr("favorite") : "");
+                accessible-action-default => { root.choose-row(i); }
+                init => { root.row-shown(i); }
+                changed index => { root.row-shown(self.index); }
+                touch := TouchArea { clicked => { root.choose-row(i); } }
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    spacing: 10px;
+                    Text {
+                        text: card.title;
+                        color: i == root.focus-row ? Theme.accent-foreground : Theme.text;
+                        font-size: Theme.font-subtitle;
+                        font-weight: i == root.focus-row ? 600 : 400;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                    if card.favorite: Text { text: "♥"; color: Theme.favorite; vertical-alignment: center; }
+                    if card.downloaded: Text { text: "✓"; color: Theme.success; font-weight: 700; vertical-alignment: center; }
+                }
+            }
+        }
+        if root.has-game: HorizontalLayout {
+            horizontal-stretch: 1;
+            spacing: 28px;
+            alignment: start;
+            VerticalLayout {
+                alignment: start;
+                Rectangle {
+                    width: 240px;
+                    height: min(self.width / max(root.game.aspect, 0.3), root.height - 8px);
+                    border-radius: Theme.radius-large;
+                    clip: true;
+                    background: Theme.surface-muted;
+                    if root.game.has-cover: Image {
+                        source: root.game.cover;
+                        width: parent.width;
+                        height: parent.height;
+                        image-fit: cover;
+                    }
+                    if !root.game.has-cover: Text {
+                        text: root.game.title;
+                        color: Theme.text-muted;
+                        wrap: word-wrap;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                        width: parent.width - 16px;
+                        x: 8px;
+                    }
+                }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                alignment: start;
+                spacing: 10px;
+                Text { text: root.game.platform; color: Theme.accent-text; font-size: Theme.font-body; font-weight: 600; overflow: elide; }
+                Text { text: root.game.title; color: Theme.text-strong; font-size: Theme.font-display; font-weight: 700; wrap: word-wrap; }
+                HorizontalLayout {
+                    spacing: 8px;
+                    alignment: start;
+                    if root.game.downloaded: Text { text: @tr("On device"); color: Theme.success; font-size: Theme.font-body; font-weight: 600; }
+                    if root.game.favorite: Text { text: "♥ " + @tr("Favorite"); color: Theme.favorite; font-size: Theme.font-body; font-weight: 600; }
+                    if root.game.versions > 1: Text { text: @tr("{n} version" | "{n} versions" % root.game.versions); color: Theme.text-muted; font-size: Theme.font-body; }
+                }
+                HorizontalLayout {
+                    alignment: start;
+                    Rectangle {
+                        width: 160px;
+                        height: 48px;
+                        border-radius: 24px;
+                        background: play-touch.has-hover ? Theme.accent-hover : Theme.accent;
+                        accessible-role: button;
+                        accessible-label: play-label.text;
+                        accessible-action-default => { root.play(); }
+                        play-label := Text {
+                            text: root.game.downloaded ? @tr("Play") : @tr("Open");
+                            color: Theme.accent-foreground;
+                            font-size: Theme.font-subtitle;
+                            font-weight: 700;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                        play-touch := TouchArea { clicked => { root.play(); } }
+                    }
+                }
+            }
+        }
+    }
+}

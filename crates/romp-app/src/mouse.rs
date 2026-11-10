@@ -1,7 +1,8 @@
 use slint::winit_030::winit::event::{
-    DeviceEvent, DeviceId, ElementState, MouseButton, WindowEvent,
+    DeviceEvent, DeviceId, ElementState, KeyEvent, MouseButton, WindowEvent,
 };
 use slint::winit_030::winit::event_loop::ActiveEventLoop;
+use slint::winit_030::winit::keyboard::{Key, NamedKey};
 use slint::winit_030::winit::window::{CursorGrabMode, Window, WindowId};
 use slint::winit_030::{CustomApplicationHandler, EventResult, WinitWindowAccessor};
 use std::cell::{Cell, RefCell};
@@ -31,12 +32,14 @@ impl Motion {
 
 type BackHandler = Box<dyn Fn(WindowId)>;
 type ExitHandler = Box<dyn Fn()>;
+type FullscreenHandler = Box<dyn Fn(WindowId) -> bool>;
 
 thread_local! {
     static MOTION: RefCell<Motion> = RefCell::default();
     static CAPTURED: Cell<bool> = const { Cell::new(false) };
     static ON_BACK: RefCell<Option<BackHandler>> = RefCell::new(None);
     static ON_EXIT: RefCell<Option<ExitHandler>> = RefCell::new(None);
+    static ON_FULLSCREEN: RefCell<Option<FullscreenHandler>> = RefCell::new(None);
 }
 
 pub struct RawMouse;
@@ -109,6 +112,24 @@ impl CustomApplicationHandler for RawMouse {
                 }
             });
         }
+        if let WindowEvent::KeyboardInput {
+            event:
+                KeyEvent {
+                    logical_key: Key::Named(NamedKey::F11),
+                    state: ElementState::Pressed,
+                    repeat: false,
+                    ..
+                },
+            ..
+        } = event
+        {
+            // Seen before any element sees it, so F11 works whatever has focus. The handler
+            // says whether the window is its own; games keep their own F11.
+            let handled = ON_FULLSCREEN.with_borrow(|f| f.as_ref().is_some_and(|f| f(window_id)));
+            if handled {
+                return EventResult::PreventDefault;
+            }
+        }
         EventResult::Propagate
     }
 }
@@ -119,6 +140,11 @@ pub fn on_exit(f: impl Fn() + 'static) {
 
 pub fn on_back_button(f: impl Fn(WindowId) + 'static) {
     ON_BACK.set(Some(Box::new(f)));
+}
+
+/// Calls `f` when F11 is pressed in a window; it returns whether it took the key.
+pub fn on_fullscreen_key(f: impl Fn(WindowId) -> bool + 'static) {
+    ON_FULLSCREEN.set(Some(Box::new(f)));
 }
 
 pub fn window_id(window: &slint::Window) -> Option<WindowId> {

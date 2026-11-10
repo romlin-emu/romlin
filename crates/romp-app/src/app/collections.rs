@@ -26,7 +26,7 @@ const AUTO_SECTIONS: [(&str, &str, CollectionKind); 3] = [
 ];
 
 const PAIR_KEY: &str = "pair";
-pub(super) const RECENT_KEY: &str = "recent";
+pub(crate) const RECENT_KEY: &str = "recent";
 pub(super) const FOR_YOU_KEY: &str = "for-you";
 pub(super) const NOW_PLAYING_KEY: &str = "now-playing";
 pub(super) const BACKLOG_KEY: &str = "backlog";

@@ -98,6 +98,7 @@ impl Controller {
             check_updates: ui.get_pref_check_updates(),
             accept_installs: ui.get_pref_accept_installs(),
             whats_new: self.prefs.get().whats_new,
+            game_list_layout: self.prefs.get().game_list_layout,
         };
         let before = self.prefs.get();
         if prefs == before {

@@ -57,7 +57,11 @@ impl Controller {
         let Some(ui) = self.ui() else { return };
         let hints = match family {
             Some(family) if !ui.get_dialog_open() && !ui.get_remap_open() => {
-                hints(ui.get_screen(), family, shoulder_menu(&ui))
+                if ui.get_fullscreen_active() {
+                    fullscreen_hints(family)
+                } else {
+                    hints(ui.get_screen(), family, shoulder_menu(&ui))
+                }
             }
             _ => Vec::new(),
         };
@@ -105,6 +109,9 @@ impl Controller {
             if button == B && self.remap_waiting.get().is_none() {
                 self.remap_close();
             }
+            return;
+        }
+        if ui.get_fullscreen_active() && self.fullscreen_button(button) {
             return;
         }
         match (ui.get_screen(), button) {
@@ -171,7 +178,21 @@ impl Controller {
         }
     }
 
-    fn move_card(&self, dir: Dir) {
+    /// Fullscreen mode's own buttons; false leaves the rest to the library's.
+    fn fullscreen_button(&self, button: u32) -> bool {
+        match button {
+            A => self.play_focused(),
+            B => self.toggle_fullscreen_mode(),
+            L | LEFT | R | RIGHT => {
+                let shoulder = if matches!(button, L | LEFT) { L } else { R };
+                self.step_fullscreen_tab(tab_step(shoulder, crate::i18n::rtl()));
+            }
+            _ => return false,
+        }
+        true
+    }
+
+    pub(super) fn move_card(&self, dir: Dir) {
         let (total, columns) = {
             let lib = self.library.borrow();
             (lib.games.len(), lib.columns)
@@ -355,6 +376,22 @@ fn hints(screen: i32, family: Family, menu: Option<Menu>) -> Vec<Hint> {
         ],
         _ => Vec::new(),
     }
+}
+
+fn fullscreen_hints(family: Family) -> Vec<Hint> {
+    let key = |button: Button| badge(family, button);
+    vec![
+        (
+            vec![Badge::Text(gettext_noop!("D-pad"))],
+            gettext_noop!("Move"),
+        ),
+        (
+            vec![key(Button::LeftTrigger), key(Button::RightTrigger)],
+            gettext_noop!("Change list"),
+        ),
+        (vec![key(family.back())], gettext_noop!("Exit full screen")),
+        (vec![key(family.confirm())], gettext_noop!("Play")),
+    ]
 }
 
 fn pad_key(badge: Badge) -> crate::PadKey {

@@ -1,4 +1,5 @@
 use crate::achievements::popups;
+use crate::fullscreen::GameListLayout;
 use serde::{Deserialize, Serialize};
 
 pub const UI_SCALES: [u8; 3] = [100, 150, 200];
@@ -20,6 +21,8 @@ pub struct Preferences {
     pub accept_installs: bool,
     /// Whether a new version shows what's new in it the first time it runs.
     pub whats_new: bool,
+    /// How fullscreen mode lays out the game list.
+    pub game_list_layout: GameListLayout,
 }
 
 impl Default for Preferences {
@@ -35,6 +38,7 @@ impl Default for Preferences {
             check_updates: true,
             accept_installs: true,
             whats_new: true,
+            game_list_layout: GameListLayout::default(),
         }
     }
 }
@@ -166,5 +170,22 @@ mod tests {
         assert!(Preferences::default().whats_new);
         assert!(Preferences::from_json(Some("{}")).whats_new);
         assert!(!Preferences::from_json(Some(r#"{"whats_new":false}"#)).whats_new);
+    }
+
+    #[test]
+    fn game_list_layout_defaults_and_ignores_unknown_ids() {
+        use crate::fullscreen::LIST_DETAIL;
+        assert_eq!(Preferences::default().game_list_layout, LIST_DETAIL);
+        assert_eq!(
+            Preferences::from_json(Some(r#"{"volume":70}"#)).game_list_layout,
+            LIST_DETAIL
+        );
+        let unknown =
+            Preferences::from_json(Some(r#"{"volume":70,"game_list_layout":"carousel"}"#));
+        assert_eq!(unknown.game_list_layout, LIST_DETAIL);
+        assert_eq!(unknown.volume, 70);
+        assert!(Preferences::default()
+            .to_json()
+            .contains(r#""game_list_layout":"list-detail""#));
     }
 }

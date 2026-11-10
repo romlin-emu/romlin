@@ -17,6 +17,7 @@ mod download;
 mod eden;
 mod external;
 mod fetch;
+mod fullscreen;
 mod gamepads;
 mod gaming_mode;
 mod grid;
