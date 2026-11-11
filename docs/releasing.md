@@ -3,7 +3,7 @@
 Release-please owns version proposals, changelog entries, and stable `vX.Y.Z` tags.
 The current workspace version is inherited by all five crates; do not set crate
 versions independently. Its manifest records the last released version, rather
-than defining a separate application version. Native `make dist` still creates
+than defining a separate application version. Native `mise run dist` still creates
 all macOS, Windows and Linux packages and their existing SHA-512 assets. Linux
 builds stay on Ubuntu 22.04 and must pass the glibc 2.35 check.
 
@@ -12,7 +12,7 @@ commit. Release-please opens a version PR on main. Review the generated changelo
 and the workspace/lockfile changes before merging. Existing upstream changelog
 entries and attribution remain intact. Curated text under `Unreleased` is retained;
 move relevant prose into the generated release entry during review if it belongs
-in those release notes. `make release-notes VERSION=0.20.0` accepts both inherited
+in those release notes. `VERSION=0.20.0 mise run release-notes` accepts both inherited
 Keep a Changelog entries and release-please's H2/H3 headings.
 
 The pinned action uses release-please 17.6.0. The `go` strategy is deliberately used
@@ -64,13 +64,13 @@ service fails or a person cancels publication.
 ## Local checks
 
 The release checks need Python 3.11+, Node 22+ with npm, and Bash, alongside the
-Rust and lint tools used by `make check`. Install the exact preview dependency
+Rust and lint tools used by `mise run check`; `mise install` provides them, including Python and Node. Install the exact preview dependency
 into a temporary directory (no repository or release writes), then run the checks:
 
 ```sh
 npm install --prefix /tmp/romlin-release-preview --ignore-scripts --no-audit --no-fund release-please@17.6.0
-NODE_PATH=/tmp/romlin-release-preview/node_modules make release-check
-NODE_PATH=/tmp/romlin-release-preview/node_modules make check
+NODE_PATH=/tmp/romlin-release-preview/node_modules mise run release-check
+NODE_PATH=/tmp/romlin-release-preview/node_modules mise run check
 python3 -m unittest discover -s packaging/steamos -v
 ```
 

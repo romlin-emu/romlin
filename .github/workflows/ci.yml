@@ -30,21 +30,14 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ inputs.ref || github.sha }}
-      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      # mise.toml pins the Rust, lint, Python and Node tools these checks use.
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
-          toolchain: stable
-          components: rustfmt
-      - uses: taiki-e/install-action@5488ac5a951645ce95062214902ac4b6bc1a1037 # v2.87.32
-        with:
-          tool: cargo-deny,cargo-machete,typos,zizmor
-      - name: Install actionlint
-        run: |
-          curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash \
-            | bash -s -- 1.7.12 "$CARGO_HOME/bin"
+          cache: false
       # Exact release-please version matches the pinned release action; test-only temporary install.
       - name: Install release preview dependency
         run: npm install --prefix "$RUNNER_TEMP/release-preview" --ignore-scripts --no-audit --no-fund release-please@17.6.0 # zizmor: ignore[adhoc-packages]
-      - run: make fmt-check deny machete typos workflows release-check
+      - run: "mise run fmt-check ::: deny ::: machete ::: typos ::: workflows ::: release-check"
         env:
           NODE_PATH: ${{ runner.temp }}/release-preview/node_modules
       - name: Check SteamOS installer
@@ -79,7 +72,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libasound2-dev libegl-dev libfontconfig1-dev libpulse-dev libudev-dev libwayland-dev libxkbcommon-dev
+      # The tasks run cargo under mise's environment (.mise/macos.env keeps Homebrew libraries out).
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          cache: false
       - name: Clippy
-        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+        run: mise run clippy
       - name: Tests
-        run: cargo test --workspace --all-features --locked
+        run: mise run test

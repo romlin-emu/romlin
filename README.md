@@ -174,15 +174,15 @@ cargo build --release
 ./target/release/romlin
 ```
 
-`make dist` packages the app into `dist/`: `Romlin.app` and a zip on macOS, a zip on Windows, an AppImage, a .deb, an .rpm and a tarball on Linux (Make downloads a pinned [appimagetool](https://github.com/AppImage/appimagetool) and [nfpm](https://nfpm.goreleaser.com) and checks them). On Windows, run it from Git Bash with Make and 7-Zip installed.
+`mise run dist` packages the app into `dist/`: `Romlin.app` and a zip on macOS, a zip on Windows, an AppImage, a .deb, an .rpm and a tarball on Linux (the task downloads a pinned [appimagetool](https://github.com/AppImage/appimagetool) and [nfpm](https://nfpm.goreleaser.com) and checks them). On Windows, run it from Git Bash with [mise](https://mise.jdx.dev) and 7-Zip installed.
 
-`make check` runs the same checks as CI: formatting, Clippy, tests, [cargo-deny](https://github.com/EmbarkStudios/cargo-deny), [cargo-machete](https://github.com/bnjbvr/cargo-machete), [typos](https://github.com/crate-ci/typos), [actionlint](https://github.com/rhysd/actionlint), [zizmor](https://github.com/zizmorcore/zizmor), and the offline release preview. See [release checks and dependency setup](docs/releasing.md#local-checks) for the required Python, Node and release-please installation. The same guide covers stable release PRs and recovery.
+`mise run check` runs the same checks as CI: formatting, Clippy, tests, [cargo-deny](https://github.com/EmbarkStudios/cargo-deny), [cargo-machete](https://github.com/bnjbvr/cargo-machete), [typos](https://github.com/crate-ci/typos), [actionlint](https://github.com/rhysd/actionlint), [zizmor](https://github.com/zizmorcore/zizmor), and the offline release preview. See [release checks and dependency setup](docs/releasing.md#local-checks) for the required Python, Node and release-please installation. The same guide covers stable release PRs and recovery.
 
 [Controller testing](docs/controller-testing.md) covers automated SDL input tests on all three platforms and opt-in Windows device tests using hidmaestro-rs.
 
 `romlin --core <core library> --rom <file>` plays a file without a RomM server, which helps when testing. `ROMLIN_PLATFORM=snes` (or any RomM platform name) gives it that console's look. With `--smoke <folder>` it plays briefly as a check, saving a frame there, and exits with an error if the game doesn't play; the Smoke test workflow runs this on each packaged build before a release.
 
-`make update-rcheevos` replaces the bundled [rcheevos](https://github.com/RetroAchievements/rcheevos) with its latest release, or a given one with `RCHEEVOS=v12.5.0`.
+`mise run update-rcheevos` replaces the bundled [rcheevos](https://github.com/RetroAchievements/rcheevos) with its latest release, or a given one with `RCHEEVOS=v12.5.0 mise run update-rcheevos`.
 
 Enter your RomM server address (RomM 5.0 or newer). Approve Romlin in RomM by scanning the code or opening the link.
 

@@ -1,4 +1,4 @@
-# The .deb and .rpm, built by `make packages` from the release binaries. Romlin finds romlin-runner
+# The .deb and .rpm, built by `mise run packages` from the release binaries. Romlin finds romlin-runner
 # and its shaders beside the program, so everything goes in /opt/romlin and the command links there.
 name: romlin
 arch: amd64

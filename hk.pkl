@@ -1,0 +1,52 @@
+amends "package://github.com/jdx/hk/releases/download/v2.12.0/hk@2.12.0#/Config.pkl"
+import "package://github.com/jdx/hk/releases/download/v2.12.0/hk@2.12.0#/Builtins.pkl"
+
+fail_fast = false
+
+local vendored = List(
+  "crates/romp-cheevos/rcheevos/**",
+  "crates/romp-cheevos/libretro/**",
+  "crates/romp-app/shaders/**",
+  "crates/romp-app/ui/icons/*.svg"
+)
+
+local linters = new Mapping<String, Step> {
+  ["check_merge_conflict"] = Builtins.check_merge_conflict
+  ["detect_private_key"] = Builtins.detect_private_key
+  // Vendored code (rcheevos, libretro headers, shaders) and the one-line SVG icons stay as shipped.
+  ["trailing_whitespace"] = (Builtins.trailing_whitespace) {
+    exclude = vendored
+  }
+  ["newlines"] = (Builtins.newlines) {
+    exclude = vendored
+  }
+  // Same invocation as `mise run fmt-check`; bare rustfmt ignores the workspace edition.
+  ["rustfmt"] = (Builtins.rustfmt) {
+    check = "cargo fmt --all --check"
+    fix = "cargo fmt --all"
+  }
+  ["cargo_clippy"] = Builtins.cargo_clippy
+  ["typos"] = Builtins.typos
+}
+
+hooks {
+  ["pre-commit"] {
+    fix = true
+    stash = "git"
+    steps = linters
+  }
+  ["check"] {
+    steps = linters
+  }
+  ["fix"] {
+    fix = true
+    steps = linters
+  }
+  ["commit-msg"] {
+    steps {
+      ["conventional-commit"] {
+        check = "hk util check-conventional-commit {{commit_msg_file}}"
+      }
+    }
+  }
+}

@@ -62,16 +62,16 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libasound2-dev libegl-dev libfontconfig1-dev libpulse-dev libudev-dev libwayland-dev libxkbcommon-dev \
             libxkbcommon-x11-0 patchelf appstream
-      - name: Install Make
-        if: runner.os == 'Windows'
-        run: choco install make --no-progress -y
-      - run: make dist VERSION="$VERSION"
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+        with:
+          cache: false
+      - run: mise run dist
         env:
           VERSION: ${{ inputs.version }}
           APPIMAGE_EXTRACT_AND_RUN: 1
       - name: Check the glibc the Linux build needs
         if: runner.os == 'Linux'
-        run: make glibc-check
+        run: mise run glibc-check
       - name: Include SteamOS installer
         if: runner.os == 'Linux'
         run: cp packaging/steamos/install.py packaging/steamos/Install-Romlin.desktop dist/
