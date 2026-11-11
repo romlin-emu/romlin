@@ -161,7 +161,7 @@ impl Controller {
 
     pub(super) fn clear_conflict(&self) {
         if self.pending_launch.borrow_mut().take().is_some() {
-            self.preparing.set(false);
+            self.set_preparing(false);
         }
         if let Some(ui) = self.ui() {
             ui.set_save_conflict(false);
@@ -186,7 +186,7 @@ impl Controller {
             self.sync_device(),
             self.game_saves(&pending.detail),
         ) else {
-            self.preparing.set(false);
+            self.set_preparing(false);
             if let Some(ui) = self.ui() {
                 ui.set_save_conflict(false);
             }
@@ -207,7 +207,7 @@ impl Controller {
                 if let Err(e) = result {
                     tracing::warn!("resolving save conflict: {e}");
                     if pending.detail.platform_slug == crate::eden::PLATFORM {
-                        c.preparing.set(false);
+                        c.set_preparing(false);
                         return c
                             .game_status(pending.detail.id, tr!("Couldn't sync saves: {e}.", e));
                     }

@@ -36,6 +36,7 @@ pub(super) enum DialogAction {
     Rename(String),
     Delete(String),
     DeleteState(u8),
+    DeleteGame,
 }
 
 /// RomM 5.4 answers a name that's taken with 409 and one over 400 characters with 422.
@@ -388,9 +389,12 @@ impl Controller {
         self.update_heading();
         self.fetch_icons(missing_icons);
         let selected = self.selected.borrow().clone();
-        if !keys.contains(&selected) && selected != "favorites" {
+        // Fullscreen mode's tab shows an empty Recently played, which the sidebar leaves out.
+        let kept = selected == "favorites" || (selected == RECENT_KEY && self.fullscreen_active());
+        if !keys.contains(&selected) && !kept {
             self.select("all".into());
         }
+        self.fullscreen_library_changed();
     }
 
     /// Named from every console and collection, as the sidebar may be hiding the selected one.
@@ -654,6 +658,14 @@ impl Controller {
                 tr!("Delete"),
                 true,
             ),
+            DialogAction::DeleteGame => (
+                tr!("Remove this game from this device?"),
+                tr!("Its saves stay, and you can download it again."),
+                false,
+                String::new(),
+                tr!("Remove"),
+                true,
+            ),
             DialogAction::DeleteState(slot) => (
                 tr!("Delete \"{}\"?", crate::slots::label(*slot)),
                 tr!("The save state is removed from this computer and from your RomM server. A backup stays in the game's save folder."),
@@ -687,6 +699,10 @@ impl Controller {
         self.open_dialog(DialogAction::Delete(key));
     }
 
+    pub(super) fn confirm_remove_game(&self) {
+        self.open_dialog(DialogAction::DeleteGame);
+    }
+
     pub(super) fn close_dialog(&self) {
         self.dialog.borrow_mut().take();
         if let Some(ui) = self.ui() {
@@ -708,6 +724,7 @@ impl Controller {
             DialogAction::Rename(key) if !name.is_empty() => self.rename(key, name),
             DialogAction::Delete(key) => self.delete(key),
             DialogAction::DeleteState(slot) => self.delete_state(slot),
+            DialogAction::DeleteGame => self.delete_game(),
             _ => {}
         }
     }

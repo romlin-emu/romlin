@@ -105,14 +105,7 @@ impl Controller {
             Some(InGameSaveStatus::FromOtherEmulator(other)) => Some((detail.id, other.clone())),
             _ => None,
         };
-        // An emulator whose states don't bring a game back gets no state slots, only its save.
-        let states = crate::cores::core_for_platform(&detail.platform_slug)
-            .is_none_or(|core| crate::cores::saves_states(core.id));
-        let state_slots = if states {
-            slots::read(&dir, slots::AUTO..=crate::input::SLOTS)
-        } else {
-            Vec::new()
-        };
+        let state_slots = self.state_slots(detail, &dir);
         let cards: Vec<SlotCard> = in_game
             .map(|status| slots::in_game_card(&status, now))
             .into_iter()
@@ -123,8 +116,40 @@ impl Controller {
                     .map(|info| slots::card(info, now, None)),
             )
             .collect();
+        let filled = state_slots.iter().filter(|info| !info.is_empty()).count();
+        ui.set_game_save_states(filled as i32);
+        ui.set_game_resume(
+            self.latest_state(detail)
+                .map(|info| info.label())
+                .unwrap_or_default()
+                .into(),
+        );
         ui.set_game_save_slots(ModelRc::new(VecModel::from(cards)));
         ui.set_game_slots_hardcore(self.ra_account().is_some() && self.ra_hardcore());
+    }
+
+    /// Every state slot of the game, filled or not.
+    fn state_slots(&self, detail: &GameDetail, dir: &std::path::Path) -> Vec<slots::SlotInfo> {
+        // An emulator whose states don't bring a game back gets no state slots, only its save.
+        let states = crate::cores::core_for_platform(&detail.platform_slug)
+            .is_none_or(|core| crate::cores::saves_states(core.id));
+        if states {
+            slots::read(dir, slots::AUTO..=crate::input::SLOTS)
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// The state saved last, which resuming loads.
+    pub(super) fn latest_state(&self, detail: &GameDetail) -> Option<slots::SlotInfo> {
+        let dir = self.game_saves(detail).map_or_else(
+            || crate::paths::game_save_dir(&crate::paths::data_dir(), &self.server(), detail.id),
+            |game| game.dir,
+        );
+        self.state_slots(detail, &dir)
+            .into_iter()
+            .filter(|info| !info.is_empty())
+            .max_by_key(|info| info.saved_at)
     }
 
     /// Copies another emulator's save from RomM as this game's, which then syncs as Romlin's.

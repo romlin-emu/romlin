@@ -1,24 +1,372 @@
-import { Locale, ListView, Theme } from "theme.slint";
+import { Locale, ListView, Theme, Row } from "theme.slint";
+import { LineEdit } from "focus.slint";
+import { ProgressIndicator } from "std-widgets.slint";
 
 export struct GameCard { id: int, title: string, platform: string, cover: image, has-cover: bool, downloaded: bool, focused: bool, favorite: bool, versions: int, aspect: float }
 export struct GameRow { cards: [GameCard], shelf: float }
+export struct PadKey { text: string, shape: string }
+export struct PadHint { keys: [PadKey], action: string }
+export struct Shot { image: image, loaded: bool }
 
-// Game list layouts for fullscreen mode. Every layout takes the same properties and callbacks, so
-// `FullscreenView` (app.slint) can show any of them; register a new one beside its entry in
-// `src/fullscreen.rs`. A layout shows one game per `rows` entry, as that entry's `columns` allow.
+// A console in the system list. `recent` holds the covers of games played lately that are already
+// on this computer; `more` is how many games lie beyond them.
+export struct SystemCard { key: string, name: string, icon: image, has-icon: bool, games: int, on-device: int, tint: color, recent: [image], more: int, last-played: string }
+export struct MenuRow { label: string, detail: string, glyph: string, danger: bool }
 
-// The games as a scrolling list, with the focused game's cover and details beside it.
+// The game fullscreen mode is showing, from the same state the game page uses. `rating` is stars
+// out of five, or -1 for none; `resume` names the save state X resumes, or is empty.
+export struct FsGame {
+    title: string,
+    platform: string,
+    genre: string,
+    credit: string,
+    players: string,
+    rating: float,
+    score: string,
+    summary: string,
+    cover: image,
+    has-cover: bool,
+    downloaded: bool,
+    favorite: bool,
+    playable: bool,
+    busy: bool,
+    progress: float,
+    can-download: bool,
+    last-played: string,
+    play-time: string,
+    save-states: int,
+    size: string,
+    resume: string,
+    status: string,
+    core: string,
+    shots: [Shot],
+}
+
+/// A controller button in a hint: its printed label, or a PlayStation symbol.
+export component PadBadge inherits Rectangle {
+    in property <PadKey> key;
+    height: 20px;
+    width: max(20px, badge-text.preferred-width + 10px);
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: Theme.border-subtle;
+    background: Theme.hover;
+    badge-text := Text { horizontal-alignment: Locale.start;
+        text: root.key.shape == "" ? root.key.text : "";
+        font-size: Theme.font-caption;
+        font-weight: 600;
+        color: Theme.text-secondary;
+    }
+    if root.key.shape != "": Image {
+        width: 12px;
+        height: 12px;
+        colorize: Theme.text-secondary;
+        source: root.key.shape == "cross" ? @image-url("icons/pad-cross.svg")
+            : root.key.shape == "circle" ? @image-url("icons/pad-circle.svg")
+            : root.key.shape == "square" ? @image-url("icons/pad-square.svg")
+            : @image-url("icons/pad-triangle.svg");
+    }
+}
+
+export component AppTile inherits Rectangle {
+    in property <image> icon;
+    in property <bool> has-icon;
+    in property <length> size: 32px;
+    width: root.size;
+    height: root.size;
+    border-radius: root.size * 0.25;
+    clip: true;
+    background: @linear-gradient(135deg, Theme.accent-hover 0%, Theme.accent-pressed 100%);
+    if root.has-icon: Image { source: root.icon; width: parent.width; height: parent.height; }
+    if !root.has-icon: Text { horizontal-alignment: Locale.start;
+        text: "▶";
+        color: Theme.text-strong;
+        font-size: root.size * 0.42;
+    }
+}
+
+component Caption inherits Text {
+    color: Theme.accent-text;
+    font-size: Theme.font-small;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    overflow: elide;
+}
+
+component Chip inherits Rectangle {
+    in property <string> text;
+    in property <color> tone: Theme.text-secondary;
+    height: 24px;
+    width: label.preferred-width + 20px;
+    border-radius: 12px;
+    border-width: 1px;
+    border-color: root.tone.with-alpha(0.5);
+    background: root.tone.with-alpha(0.12);
+    label := Text {
+        text: root.text;
+        color: root.tone;
+        font-size: Theme.font-small;
+        font-weight: 600;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component Stat inherits VerticalLayout {
+    in property <string> label;
+    in property <string> value;
+    spacing: 4px;
+    Caption { text: root.label; color: Theme.text-muted; font-size: Theme.font-caption; }
+    Text { text: root.value; color: Theme.text-strong; font-size: Theme.font-body-large; font-weight: 600; overflow: elide; }
+}
+
+component Stars inherits Rectangle {
+    in property <float> rating;
+    width: 5 * 16px;
+    height: 16px;
+    for i in 5: Rectangle {
+        x: i * 16px;
+        width: 16px;
+        Text { text: "★"; color: Theme.border-subtle; font-size: 14px; horizontal-alignment: center; }
+        Rectangle {
+            width: clamp(root.rating - i, 0, 1) * 16px;
+            clip: true;
+            Text { x: 0; width: 16px; text: "★"; color: #f5b83d; font-size: 14px; horizontal-alignment: center; }
+        }
+    }
+}
+
+component Pill inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary;
+    in property <bool> ring;
+    in property <bool> enabled: true;
+    callback clicked();
+    height: 44px;
+    width: label.preferred-width + 44px;
+    border-radius: 22px;
+    opacity: root.enabled ? 1 : 0.45;
+    background: root.primary ? (touch.has-hover && root.enabled ? Theme.accent-hover : Theme.accent) : (touch.has-hover && root.enabled ? Theme.pressed : Theme.hover);
+    border-width: root.ring ? 3px : 1px;
+    border-color: root.ring ? Theme.text-strong : Theme.border-subtle;
+    accessible-role: button;
+    accessible-label: root.text;
+    accessible-enabled: root.enabled;
+    accessible-action-default => { if root.enabled { root.clicked(); } }
+    label := Text {
+        text: root.text;
+        color: root.primary ? Theme.accent-foreground : Theme.text-strong;
+        font-size: Theme.font-subtitle;
+        font-weight: 700;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea { enabled: root.enabled; clicked => { root.clicked(); } }
+}
+
+component Cover inherits Rectangle {
+    in property <image> source;
+    in property <bool> loaded;
+    in property <string> fallback;
+    border-radius: Theme.radius-large;
+    clip: true;
+    background: Theme.surface-muted;
+    if root.loaded: Image { source: root.source; width: parent.width; height: parent.height; image-fit: cover; }
+    if !root.loaded: Text {
+        text: root.fallback;
+        color: Theme.text-muted;
+        wrap: word-wrap;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+        width: parent.width - 16px;
+        x: 8px;
+    }
+}
+
+component HintItem inherits HorizontalLayout {
+    in property <PadHint> hint;
+    spacing: 8px;
+    for key in root.hint.keys: VerticalLayout {
+        alignment: center;
+        PadBadge { key: key; }
+    }
+    Text { text: root.hint.action; color: Theme.text-secondary; font-size: Theme.font-body; vertical-alignment: center; }
+}
+
+component TopBar inherits Rectangle {
+    in property <string> brand;
+    in property <image> icon;
+    in property <bool> has-icon;
+    in property <string> heading;
+    in property <bool> offline;
+    height: 64px;
+    HorizontalLayout {
+        padding-left: 40px;
+        padding-right: 40px;
+        spacing: 14px;
+        VerticalLayout {
+            alignment: center;
+            AppTile { size: 28px; icon: root.icon; has-icon: root.has-icon; }
+        }
+        Text { text: root.brand; color: Theme.text-strong; font-size: Theme.font-subtitle; font-weight: 800; letter-spacing: 2px; vertical-alignment: center; }
+        VerticalLayout {
+            alignment: center;
+            Rectangle { width: 1px; height: 18px; background: Theme.border-subtle; }
+        }
+        Text { text: root.heading; color: Theme.text-secondary; font-size: Theme.font-body-large; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+        if root.offline: Text { text: @tr("Offline"); color: Theme.warning; font-size: Theme.font-body; font-weight: 600; vertical-alignment: center; }
+    }
+}
+
+component HintBar inherits Rectangle {
+    in property <[PadHint]> start;
+    in property <[PadHint]> end;
+    height: 64px;
+    HorizontalLayout {
+        padding-left: 40px;
+        padding-right: 40px;
+        spacing: 24px;
+        for hint in root.start: HintItem { hint: hint; }
+        Rectangle { horizontal-stretch: 1; }
+        for hint in root.end: HintItem { hint: hint; }
+    }
+}
+
+// The consoles side by side, the focused one enlarged and centred.
+component SystemsCarousel inherits Rectangle {
+    in property <[SystemCard]> systems;
+    in property <int> index: 0;
+    in property <string> empty-text;
+    callback chosen(int);
+
+    property <length> small: 220px;
+    property <length> big: 340px;
+    property <length> gap: 28px;
+    property <SystemCard> current: root.systems[clamp(root.index, 0, root.systems.length - 1)];
+
+    if root.systems.length == 0: Text {
+        text: root.empty-text;
+        color: Theme.text-muted;
+        font-size: Theme.font-subtitle;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    if root.systems.length > 0: VerticalLayout {
+        spacing: 22px;
+        Rectangle {
+            vertical-stretch: 1;
+            clip: true;
+            strip := Rectangle {
+                x: root.width / 2 - (root.index * (root.small + root.gap) + root.big / 2);
+                animate x { duration: 220ms; easing: ease-out; }
+                for s[i] in root.systems: card := Rectangle {
+                    property <bool> focused: i == root.index;
+                    x: i * (root.small + root.gap) + (i > root.index ? root.big - root.small : 0px);
+                    width: self.focused ? root.big : root.small;
+                    height: min(parent.height - 24px, self.focused ? 420px : 320px);
+                    y: (parent.height - self.height) / 2;
+                    animate x, width, height { duration: 220ms; easing: ease-out; }
+                    border-radius: 20px;
+                    border-width: self.focused ? 3px : 0px;
+                    border-color: Theme.text-strong;
+                    clip: true;
+                    background: @linear-gradient(160deg, s.tint.brighter(0.35) 0%, s.tint.darker(0.55) 100%);
+                    accessible-role: button;
+                    accessible-label: s.name;
+                    accessible-description: @tr("{n} game" | "{n} games" % s.games);
+                    accessible-action-default => { root.chosen(i); }
+                    touch := TouchArea { clicked => { root.chosen(i); } }
+                    VerticalLayout {
+                        padding: 22px;
+                        spacing: 10px;
+                        if s.has-icon: Image {
+                            source: s.icon;
+                            height: card.focused ? 48px : 36px;
+                            width: self.height;
+                            image-fit: contain;
+                        }
+                        Text {
+                            text: s.name;
+                            color: Theme.text-strong;
+                            font-size: card.focused ? 30px : 20px;
+                            font-weight: 800;
+                            wrap: word-wrap;
+                        }
+                        Rectangle { vertical-stretch: 1; }
+                        if card.focused && (s.recent.length > 0): VerticalLayout {
+                            spacing: 8px;
+                            Caption { text: @tr("JUMP BACK IN"); color: Theme.text-secondary; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                alignment: start;
+                                for art in s.recent: Rectangle {
+                                    width: 64px;
+                                    height: 64px;
+                                    border-radius: Theme.radius;
+                                    clip: true;
+                                    background: #00000040;
+                                    Image { source: art; width: parent.width; height: parent.height; image-fit: cover; }
+                                }
+                                if s.more > 0: Rectangle {
+                                    width: 64px;
+                                    height: 64px;
+                                    border-radius: Theme.radius;
+                                    background: #ffffff24;
+                                    Text { text: "+" + s.more; color: Theme.text-strong; font-size: Theme.font-subtitle; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                                }
+                            }
+                        }
+                        Text {
+                            text: @tr("{n} game" | "{n} games" % s.games);
+                            color: Theme.text-strong;
+                            font-size: card.focused ? Theme.font-body-large : Theme.font-body;
+                            font-weight: 600;
+                        }
+                    }
+                }
+            }
+        }
+        HorizontalLayout {
+            alignment: center;
+            spacing: 18px;
+            Text { text: @tr("{n} game" | "{n} games" % root.current.games); color: Theme.text-secondary; font-size: Theme.font-body; }
+            if root.current.on-device > 0: Text { text: @tr("{} on device", root.current.on-device); color: Theme.text-secondary; font-size: Theme.font-body; }
+            if root.current.last-played != "": Text { text: @tr("Last played {}", root.current.last-played); color: Theme.text-muted; font-size: Theme.font-body; }
+        }
+        HorizontalLayout {
+            alignment: center;
+            spacing: 6px;
+            padding-bottom: 6px;
+            for i in root.systems.length: Rectangle {
+                width: i == root.index ? 18px : 6px;
+                height: 6px;
+                border-radius: 3px;
+                background: i == root.index ? Theme.accent : Theme.border-subtle;
+                animate width { duration: 160ms; }
+            }
+        }
+    }
+}
+
+// The games as a scrolling list, with the focused game's cover and details beside it. Every game
+// list layout takes the same properties and callbacks, so `FullscreenView` can show any of them;
+// register a new one beside its entry in `src/fullscreen.rs`. A layout shows one game per `rows`
+// entry, as that entry's `columns` allow.
 export component ListDetailLayout inherits Rectangle {
     in property <[GameRow]> rows;
     in property <int> focus-row: -1;
     in property <string> empty-text;
+    in property <FsGame> game;
+    in property <bool> detail-ready;
     callback row-shown(int);
     callback choose-row(int);
     callback play();
+    callback resume();
+    callback open-page();
 
-    property <length> row-height: 44px;
+    property <length> row-height: 46px;
     property <bool> has-game: root.focus-row >= 0 && root.focus-row < root.rows.length;
-    property <GameCard> game: root.rows[root.focus-row].cards[0];
+    property <GameCard> card: root.rows[root.focus-row].cards[0];
 
     if root.rows.length == 0: Text {
         text: root.empty-text;
@@ -28,11 +376,11 @@ export component ListDetailLayout inherits Rectangle {
         vertical-alignment: center;
     }
     if root.rows.length > 0: HorizontalLayout {
-        padding-left: 32px;
-        padding-right: 32px;
-        spacing: 32px;
+        padding-left: 40px;
+        padding-right: 40px;
+        spacing: 40px;
         list := ListView {
-            width: max(280px, root.width * 0.38);
+            width: max(300px, root.width * 0.34);
             // Keeps the focused row in view.
             property <int> focus-row: root.focus-row;
             changed focus-row => {
@@ -59,87 +407,483 @@ export component ListDetailLayout inherits Rectangle {
                 changed index => { root.row-shown(self.index); }
                 touch := TouchArea { clicked => { root.choose-row(i); } }
                 HorizontalLayout {
-                    padding-left: 14px;
-                    padding-right: 14px;
+                    padding-left: 16px;
+                    padding-right: 16px;
                     spacing: 10px;
                     Text {
                         text: card.title;
                         color: i == root.focus-row ? Theme.accent-foreground : Theme.text;
-                        font-size: Theme.font-subtitle;
+                        font-size: Theme.font-body-large;
                         font-weight: i == root.focus-row ? 600 : 400;
                         vertical-alignment: center;
                         overflow: elide;
                         horizontal-stretch: 1;
                     }
-                    if card.favorite: Text { text: "♥"; color: Theme.favorite; vertical-alignment: center; }
-                    if card.downloaded: Text { text: "✓"; color: Theme.success; font-weight: 700; vertical-alignment: center; }
+                    if card.favorite: Text { text: "♥"; color: i == root.focus-row ? Theme.accent-foreground : Theme.favorite; vertical-alignment: center; }
+                    if card.downloaded: Text { text: "✓"; color: i == root.focus-row ? Theme.accent-foreground : Theme.success; font-weight: 700; vertical-alignment: center; }
                 }
             }
         }
         if root.has-game: HorizontalLayout {
             horizontal-stretch: 1;
-            spacing: 28px;
+            spacing: 32px;
             alignment: start;
             VerticalLayout {
                 alignment: start;
                 Rectangle {
-                    width: 240px;
-                    height: min(self.width / max(root.game.aspect, 0.3), root.height - 8px);
-                    border-radius: Theme.radius-large;
-                    clip: true;
-                    background: Theme.surface-muted;
-                    if root.game.has-cover: Image {
-                        source: root.game.cover;
+                    width: 230px;
+                    height: min(self.width / max(root.card.aspect, 0.3), root.height - 8px);
+                    Cover {
                         width: parent.width;
                         height: parent.height;
-                        image-fit: cover;
+                        source: root.card.cover;
+                        loaded: root.card.has-cover;
+                        fallback: root.card.title;
                     }
-                    if !root.game.has-cover: Text {
-                        text: root.game.title;
-                        color: Theme.text-muted;
-                        wrap: word-wrap;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                        width: parent.width - 16px;
-                        x: 8px;
-                    }
+                    TouchArea { clicked => { root.open-page(); } }
                 }
             }
             VerticalLayout {
                 horizontal-stretch: 1;
                 alignment: start;
-                spacing: 10px;
-                Text { text: root.game.platform; color: Theme.accent-text; font-size: Theme.font-body; font-weight: 600; overflow: elide; }
-                Text { text: root.game.title; color: Theme.text-strong; font-size: Theme.font-display; font-weight: 700; wrap: word-wrap; }
+                spacing: 12px;
+                if root.detail-ready && root.game.genre != "": Caption { text: root.game.genre; }
+                Text { text: root.card.title; color: Theme.text-strong; font-size: Theme.font-display; font-weight: 800; wrap: word-wrap; }
+                if root.detail-ready && root.game.credit != "": Text { text: root.game.credit; color: Theme.text-secondary; font-size: Theme.font-body-large; overflow: elide; }
+                if root.detail-ready && root.game.rating >= 0: HorizontalLayout {
+                    spacing: 10px;
+                    alignment: start;
+                    Stars { rating: root.game.rating; }
+                    Text { text: root.game.score; color: Theme.text-muted; font-size: Theme.font-body; vertical-alignment: center; }
+                }
                 HorizontalLayout {
                     spacing: 8px;
                     alignment: start;
-                    if root.game.downloaded: Text { text: @tr("On device"); color: Theme.success; font-size: Theme.font-body; font-weight: 600; }
-                    if root.game.favorite: Text { text: "♥ " + @tr("Favorite"); color: Theme.favorite; font-size: Theme.font-body; font-weight: 600; }
-                    if root.game.versions > 1: Text { text: @tr("{n} version" | "{n} versions" % root.game.versions); color: Theme.text-muted; font-size: Theme.font-body; }
+                    if root.card.downloaded: Chip { text: @tr("On device"); tone: Theme.success; }
+                    if root.card.favorite: Chip { text: @tr("Favorite"); tone: Theme.favorite; }
+                    if root.detail-ready && root.game.players != "": Chip { text: root.game.players; }
+                    if root.card.versions > 1: Chip { text: @tr("{n} version" | "{n} versions" % root.card.versions); }
+                }
+                if root.detail-ready: HorizontalLayout {
+                    spacing: 36px;
+                    alignment: start;
+                    if root.game.last-played != "": Stat { label: @tr("LAST PLAYED"); value: root.game.last-played; }
+                    if root.game.play-time != "": Stat { label: @tr("PLAY TIME"); value: root.game.play-time; }
+                    if root.game.save-states > 0: Stat { label: @tr("SAVE STATES"); value: "" + root.game.save-states; }
+                    if root.game.size != "": Stat { label: @tr("SIZE"); value: root.game.size; }
+                }
+                if root.detail-ready && root.game.summary != "": Rectangle {
+                    height: 84px;
+                    clip: true;
+                    Text {
+                        width: parent.width;
+                        text: root.game.summary;
+                        color: Theme.text-secondary;
+                        font-size: Theme.font-body-large;
+                        wrap: word-wrap;
+                    }
                 }
                 HorizontalLayout {
+                    spacing: 12px;
                     alignment: start;
-                    Rectangle {
-                        width: 160px;
-                        height: 48px;
-                        border-radius: 24px;
-                        background: play-touch.has-hover ? Theme.accent-hover : Theme.accent;
-                        accessible-role: button;
-                        accessible-label: play-label.text;
-                        accessible-action-default => { root.play(); }
-                        play-label := Text {
-                            text: root.game.downloaded ? @tr("Play") : @tr("Open");
-                            color: Theme.accent-foreground;
-                            font-size: Theme.font-subtitle;
-                            font-weight: 700;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-                        play-touch := TouchArea { clicked => { root.play(); } }
+                    Pill {
+                        primary: true;
+                        text: root.card.downloaded ? @tr("Play") : @tr("Open");
+                        clicked => { root.play(); }
+                    }
+                    if root.detail-ready && root.game.resume != "": Pill {
+                        text: @tr("Resume · {}", root.game.resume);
+                        clicked => { root.resume(); }
+                    }
+                }
+                if root.detail-ready && root.game.status != "": Text { text: root.game.status; color: Theme.warning; font-size: Theme.font-body; wrap: word-wrap; }
+            }
+        }
+    }
+}
+
+// A game's own page: its artwork behind the details, what it needs to play, and its pictures.
+component GamePageView inherits Rectangle {
+    in property <FsGame> game;
+    callback play();
+    callback resume();
+    callback download();
+    callback cancel();
+
+    if root.game.has-cover: Image {
+        source: root.game.cover;
+        width: parent.width;
+        height: parent.height;
+        image-fit: cover;
+        opacity: 0.3;
+    }
+    Rectangle {
+        background: @linear-gradient(90deg, Theme.background 0%, Theme.background.with-alpha(0.7) 55%, Theme.background.with-alpha(0.2) 100%);
+    }
+    VerticalLayout {
+        padding-left: 56px;
+        padding-right: 56px;
+        padding-bottom: 8px;
+        spacing: 18px;
+        VerticalLayout {
+            vertical-stretch: 1;
+            alignment: center;
+            spacing: 14px;
+            Text {
+                text: root.game.title;
+                color: Theme.text-strong;
+                font-size: 52px;
+                font-weight: 800;
+                wrap: word-wrap;
+                max-width: 760px;
+            }
+            Text {
+                text: root.game.platform + (root.game.credit != "" ? " · " + root.game.credit : "");
+                color: Theme.text-secondary;
+                font-size: Theme.font-body-large;
+                overflow: elide;
+                max-width: 760px;
+            }
+            HorizontalLayout {
+                spacing: 8px;
+                alignment: start;
+                if root.game.genre != "": Chip { text: root.game.genre; }
+                if root.game.players != "": Chip { text: root.game.players; }
+                if root.game.downloaded: Chip { text: @tr("On device"); tone: Theme.success; }
+                if root.game.favorite: Chip { text: @tr("Favorite"); tone: Theme.favorite; }
+                if root.game.rating >= 0: Stars { rating: root.game.rating; }
+            }
+            if root.game.summary != "": Rectangle {
+                width: min(parent.width, 760px);
+                height: 96px;
+                clip: true;
+                Text { width: parent.width; text: root.game.summary; color: Theme.text; font-size: Theme.font-body-large; wrap: word-wrap; }
+            }
+            HorizontalLayout {
+                spacing: 12px;
+                alignment: start;
+                if root.game.downloaded: Pill {
+                    primary: true;
+                    ring: true;
+                    enabled: root.game.playable;
+                    text: @tr("Play");
+                    clicked => { root.play(); }
+                }
+                if !root.game.downloaded && !root.game.busy: Pill {
+                    primary: true;
+                    ring: root.game.can-download;
+                    enabled: root.game.can-download && root.game.playable;
+                    text: root.game.size != "" ? @tr("Download · {}", root.game.size) : @tr("Download");
+                    clicked => { root.download(); }
+                }
+                if root.game.busy: Pill {
+                    text: @tr("Cancel download");
+                    clicked => { root.cancel(); }
+                }
+                if root.game.resume != "" && root.game.downloaded: Pill {
+                    text: @tr("Resume · {}", root.game.resume);
+                    clicked => { root.resume(); }
+                }
+            }
+            if root.game.busy: Rectangle {
+                width: 360px;
+                height: 6px;
+                ProgressIndicator { width: parent.width; progress: root.game.progress; }
+            }
+            if root.game.status != "": Text { text: root.game.status; color: Theme.warning; font-size: Theme.font-body; wrap: word-wrap; max-width: 760px; }
+        }
+        if root.game.shots.length > 0 || root.game.has-cover: VerticalLayout {
+            spacing: 10px;
+            Caption { text: @tr("MEDIA"); color: Theme.text-muted; }
+            HorizontalLayout {
+                spacing: 14px;
+                alignment: start;
+                if root.game.has-cover: VerticalLayout {
+                    spacing: 6px;
+                    Cover { width: 90px; height: 110px; source: root.game.cover; loaded: true; border-radius: Theme.radius; }
+                    Text { text: @tr("Box art"); color: Theme.text-muted; font-size: Theme.font-small; }
+                }
+                for shot[i] in root.game.shots: VerticalLayout {
+                    if i < 4 && shot.loaded: VerticalLayout {
+                        spacing: 6px;
+                        Cover { width: 196px; height: 110px; source: shot.image; loaded: true; border-radius: Theme.radius; }
+                        Text { text: @tr("Screenshot {}", i + 1); color: Theme.text-muted; font-size: Theme.font-small; }
                     }
                 }
             }
+        }
+    }
+}
+
+// A game opening: what it is, and what Romlin is doing before it starts.
+component LaunchView inherits Rectangle {
+    in property <FsGame> game;
+    HorizontalLayout {
+        alignment: center;
+        spacing: 56px;
+        padding: 40px;
+        VerticalLayout {
+            alignment: center;
+            Cover {
+                width: 220px;
+                height: 300px;
+                source: root.game.cover;
+                loaded: root.game.has-cover;
+                fallback: root.game.title;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 14px;
+            width: 460px;
+            Text { text: root.game.title; color: Theme.text-strong; font-size: 44px; font-weight: 800; wrap: word-wrap; }
+            Text {
+                text: root.game.core != "" ? @tr("Starting on {}", root.game.core) : @tr("Starting");
+                color: Theme.accent-text;
+                font-size: Theme.font-subtitle;
+                font-weight: 600;
+            }
+            ProgressIndicator { indeterminate: true; width: parent.width; }
+            Text { text: root.game.status; color: Theme.text-muted; font-size: Theme.font-body; wrap: word-wrap; }
+        }
+    }
+}
+
+// The game menu, sliding in from the right over the dimmed screen.
+component MenuPanel inherits Rectangle {
+    in property <FsGame> game;
+    in property <[MenuRow]> rows;
+    in property <int> index: 0;
+    callback chosen(int);
+    callback dismissed();
+
+    background: Theme.scrim;
+    TouchArea { clicked => { root.dismissed(); } }
+    panel := Rectangle {
+        x: parent.width - self.width;
+        width: min(400px, parent.width);
+        background: Theme.surface;
+        border-width: 1px;
+        border-color: Theme.border-subtle;
+        TouchArea { }
+        VerticalLayout {
+            padding: 20px;
+            spacing: 6px;
+            HorizontalLayout {
+                spacing: 14px;
+                padding-bottom: 14px;
+                Cover { width: 56px; height: 72px; source: root.game.cover; loaded: root.game.has-cover; border-radius: Theme.radius; }
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 3px;
+                    Caption { text: @tr("GAME MENU"); }
+                    Text { text: root.game.title; color: Theme.text-strong; font-size: Theme.font-subtitle; font-weight: 700; overflow: elide; }
+                    Text { text: root.game.platform; color: Theme.text-muted; font-size: Theme.font-small; overflow: elide; }
+                }
+            }
+            for row[i] in root.rows: Rectangle {
+                height: 46px;
+                border-radius: Theme.radius;
+                background: i == root.index ? (row.danger ? Theme.danger : Theme.accent) : item-touch.has-hover ? Theme.hover : transparent;
+                accessible-role: button;
+                accessible-label: row.label;
+                accessible-description: row.detail;
+                accessible-action-default => { root.chosen(i); }
+                item-touch := TouchArea { clicked => { root.chosen(i); } }
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    spacing: 12px;
+                    Text {
+                        width: 18px;
+                        text: row.glyph;
+                        color: i == root.index ? Theme.accent-foreground : row.danger ? Theme.danger : Theme.text-secondary;
+                        font-size: Theme.font-body-large;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: row.label;
+                        color: i == root.index ? Theme.accent-foreground : row.danger ? Theme.danger : Theme.text;
+                        font-size: Theme.font-body-large;
+                        font-weight: i == root.index ? 600 : 400;
+                        vertical-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
+                    }
+                    Text {
+                        text: row.detail;
+                        color: i == root.index ? Theme.accent-foreground : Theme.text-muted;
+                        font-size: Theme.font-small;
+                        vertical-alignment: center;
+                        horizontal-alignment: right;
+                    }
+                }
+            }
+            Rectangle { vertical-stretch: 1; }
+        }
+    }
+}
+
+// Fullscreen mode: a top bar, one of the pages, and a hint bar. `page` is 0 for the systems, 1 for
+// a system's games, 2 for a game's page and 3 for a game opening.
+export component FullscreenView inherits FocusScope {
+    in property <bool> modal-open;
+    in property <string> layout;
+    in property <string> brand;
+    in property <image> app-icon;
+    in property <bool> has-app-icon;
+    in property <string> heading;
+    in property <bool> offline;
+    in property <int> page;
+    in property <[SystemCard]> systems;
+    in property <int> system: 0;
+    in property <[GameRow]> rows;
+    in property <int> focus-row: -1;
+    in property <int> tab: -1;
+    in property <[int]> counts;
+    in property <int> sort-index;
+    in property <string> empty-text;
+    in property <FsGame> game;
+    in property <bool> detail-ready;
+    in property <bool> menu-open;
+    in property <[MenuRow]> menu;
+    in property <int> menu-focus;
+    in-out property <bool> search-open;
+    in-out property <string> search;
+    in property <[PadHint]> hints-start;
+    in property <[PadHint]> hints-end;
+    // Whether the key was an action; the app decides what each one does on the page it's showing.
+    callback key(string, bool) -> bool;
+    callback system-chosen(int);
+    callback tab-chosen(int);
+    callback row-chosen(int);
+    callback row-shown(int);
+    // `play` is for the focused game in the list; `play-game` for the game on its page.
+    callback play();
+    callback play-game();
+    callback resume();
+    callback open-page();
+    callback download();
+    callback cancel();
+    callback menu-chosen(int);
+    callback menu-dismissed();
+    callback search-edited(string);
+    callback search-submitted();
+
+    focus-on-tab-navigation: false;
+    init => { root.focus(); }
+    changed modal-open => { if !root.modal-open { root.focus(); } }
+    changed search-open => { if root.search-open { search-field.focus(); } else { root.focus(); } }
+    key-pressed(event) => {
+        if root.key(event.text, event.modifiers.control) { return accept; }
+        return reject;
+    }
+
+    Rectangle {
+        background: @linear-gradient(180deg, Theme.background.brighter(0.08) 0%, Theme.background 60%);
+        VerticalLayout {
+            TopBar {
+                brand: root.brand;
+                icon: root.app-icon;
+                has-icon: root.has-app-icon;
+                heading: root.heading;
+                offline: root.offline;
+            }
+            Rectangle {
+                height: root.search-open ? 52px : 0px;
+                visible: root.search-open;
+                clip: true;
+                HorizontalLayout {
+                    padding-left: 40px;
+                    padding-right: 40px;
+                    padding-bottom: 12px;
+                    search-field := LineEdit {
+                        placeholder-text: @tr("Search games");
+                        text <=> root.search;
+                        edited(text) => { root.search-edited(text); }
+                        accepted => { root.search-submitted(); }
+                    }
+                }
+            }
+            if root.page == 1: HorizontalLayout {
+                padding-left: 40px;
+                padding-right: 40px;
+                padding-bottom: 14px;
+                spacing: 8px;
+                for name[i] in [@tr("All"), @tr("Favorites"), @tr("On device"), @tr("Recently played")]: Rectangle {
+                    width: tab-label.preferred-width + (tab-count.visible ? tab-count.preferred-width + 8px : 0px) + 32px;
+                    height: 34px;
+                    border-radius: 17px;
+                    background: i == root.tab ? Theme.surface-selected : tab-touch.has-hover ? Theme.hover : transparent;
+                    accessible-role: button;
+                    accessible-label: name;
+                    accessible-checkable: true;
+                    accessible-checked: i == root.tab;
+                    accessible-action-default => { root.tab-chosen(i); }
+                    tab-label := Text {
+                        x: 16px;
+                        text: name;
+                        color: i == root.tab ? Theme.text-strong : Theme.text-secondary;
+                        font-size: Theme.font-body-large;
+                        font-weight: i == root.tab ? 600 : 400;
+                        vertical-alignment: center;
+                    }
+                    tab-count := Text {
+                        visible: i < root.counts.length;
+                        x: tab-label.x + tab-label.width + 8px;
+                        text: "" + root.counts[i];
+                        color: Theme.text-muted;
+                        font-size: Theme.font-small;
+                        vertical-alignment: center;
+                    }
+                    tab-touch := TouchArea { clicked => { root.tab-chosen(i); } }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                Text {
+                    text: [@tr("Name"), @tr("Date added"), @tr("Last played")][root.sort-index];
+                    color: Theme.text-muted;
+                    font-size: Theme.font-body;
+                    vertical-alignment: center;
+                }
+            }
+            Rectangle {
+                vertical-stretch: 1;
+                if root.page == 0: SystemsCarousel {
+                    systems: root.systems;
+                    index: root.system;
+                    empty-text: root.empty-text;
+                    chosen(i) => { root.system-chosen(i); }
+                }
+                if root.page == 1 && root.layout == "list-detail": ListDetailLayout {
+                    rows: root.rows;
+                    focus-row: root.focus-row;
+                    empty-text: root.empty-text;
+                    game: root.game;
+                    detail-ready: root.detail-ready;
+                    row-shown(i) => { root.row-shown(i); }
+                    choose-row(i) => { root.row-chosen(i); }
+                    play => { root.play(); }
+                    resume => { root.resume(); }
+                    open-page => { root.open-page(); }
+                }
+                if root.page == 2: GamePageView {
+                    game: root.game;
+                    play => { root.play-game(); }
+                    resume => { root.resume(); }
+                    download => { root.download(); }
+                    cancel => { root.cancel(); }
+                }
+                if root.page == 3: LaunchView { game: root.game; }
+                if root.menu-open: MenuPanel {
+                    game: root.game;
+                    rows: root.menu;
+                    index: root.menu-focus;
+                    chosen(i) => { root.menu-chosen(i); }
+                    dismissed => { root.menu-dismissed(); }
+                }
+            }
+            HintBar { start: root.hints-start; end: root.hints-end; }
         }
     }
 }

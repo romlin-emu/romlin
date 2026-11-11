@@ -131,6 +131,171 @@ impl Mode {
     }
 }
 
+/// What fullscreen mode is showing. The game page is the app's own game screen.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum View {
+    #[default]
+    Systems,
+    Games,
+}
+
+/// Where the player is: one of the views, or a game's page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Page {
+    Systems,
+    Games,
+    Game,
+}
+
+/// Something the player asked for, from a controller button or a key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Action {
+    Up,
+    Down,
+    Left,
+    Right,
+    Accept,
+    Back,
+    /// The previous system, list or game.
+    Prev,
+    Next,
+    JumpBack,
+    JumpForward,
+    Menu,
+    Favorite,
+    Resume,
+    Random,
+    Search,
+    Download,
+}
+
+impl Action {
+    /// What a menu button does on `page`; the buttons are the ones the rest of the app names.
+    pub fn from_button(page: Page, button: u32) -> Option<Self> {
+        use crate::input::{A, B, DOWN, L, L2, LEFT, R, R2, RIGHT, START, UP, X, Y};
+        Some(match (button, page) {
+            (UP, _) => Self::Up,
+            (DOWN, _) => Self::Down,
+            (LEFT, _) => Self::Left,
+            (RIGHT, _) => Self::Right,
+            (A, _) => Self::Accept,
+            (B, _) => Self::Back,
+            (L, _) => Self::Prev,
+            (R, _) => Self::Next,
+            (START, _) => Self::Menu,
+            (L2, Page::Games) => Self::JumpBack,
+            (R2, Page::Games) => Self::JumpForward,
+            (X, Page::Systems) => Self::Search,
+            (Y, Page::Systems) => Self::Random,
+            (X, Page::Games | Page::Game) => Self::Favorite,
+            (Y, Page::Games) => Self::Resume,
+            (Y, Page::Game) => Self::Download,
+            _ => return None,
+        })
+    }
+
+    /// What a key does. `text` is the key's text as Slint reports it.
+    pub fn from_key(text: &str, ctrl: bool) -> Option<Self> {
+        use slint::platform::Key;
+        let mut chars = text.chars();
+        let (first, rest) = (chars.next()?, chars.next());
+        let named = [
+            (Key::UpArrow, Self::Up),
+            (Key::DownArrow, Self::Down),
+            (Key::LeftArrow, Self::Left),
+            (Key::RightArrow, Self::Right),
+            (Key::Return, Self::Accept),
+            (Key::Escape, Self::Back),
+            (Key::Backspace, Self::Back),
+            (Key::PageUp, Self::Prev),
+            (Key::PageDown, Self::Next),
+            (Key::Home, Self::JumpBack),
+            (Key::End, Self::JumpForward),
+        ];
+        if let Some((_, action)) = named.iter().find(|(key, _)| char::from(*key) == first) {
+            return Some(*action);
+        }
+        if rest.is_some() {
+            return None;
+        }
+        Some(match first {
+            '/' => Self::Search,
+            'f' | 'F' if ctrl => Self::Search,
+            'm' | 'M' => Self::Menu,
+            'f' | 'F' => Self::Favorite,
+            'r' | 'R' => Self::Resume,
+            'x' | 'X' => Self::Random,
+            'd' | 'D' => Self::Download,
+            _ => return None,
+        })
+    }
+}
+
+/// The first game of the next letter, or of this one when going back from partway through it.
+/// Games starting with a digit or a symbol share one group, as they do in a sorted list.
+pub fn letter_jump<S: AsRef<str>>(titles: &[S], from: usize, forward: bool) -> Option<usize> {
+    let group = |i: usize| {
+        titles[i]
+            .as_ref()
+            .chars()
+            .find(|c| c.is_alphanumeric())
+            .map(|c| c.to_uppercase().next().unwrap_or(c))
+            .filter(|c| c.is_alphabetic())
+    };
+    let from = from.min(titles.len().checked_sub(1)?);
+    let current = group(from);
+    if forward {
+        return (from + 1..titles.len()).find(|&i| group(i) != current);
+    }
+    let start = (0..=from)
+        .rev()
+        .take_while(|&i| group(i) == current)
+        .last()
+        .unwrap_or(from);
+    if start < from {
+        return Some(start);
+    }
+    let previous = start.checked_sub(1)?;
+    let before = group(previous);
+    Some(
+        (0..=previous)
+            .rev()
+            .take_while(|&i| group(i) == before)
+            .last()
+            .unwrap_or(previous),
+    )
+}
+
+/// A console's colour in the system list: stable for a slug, spread around the hue wheel.
+pub fn system_tint(slug: &str) -> (u8, u8, u8) {
+    let hash = slug.bytes().fold(2_166_136_261_u32, |h, b| {
+        (h ^ u32::from(b)).wrapping_mul(16_777_619)
+    });
+    let hue = f32::from((hash % 360) as u16);
+    let (saturation, lightness) = (0.42_f32, 0.34_f32);
+    let chroma = (1.0 - (2.0 * lightness - 1.0).abs()) * saturation;
+    let x = chroma * (1.0 - ((hue / 60.0) % 2.0 - 1.0).abs());
+    let (r, g, b) = match (hue / 60.0) as u8 {
+        0 => (chroma, x, 0.0),
+        1 => (x, chroma, 0.0),
+        2 => (0.0, chroma, x),
+        3 => (0.0, x, chroma),
+        4 => (x, 0.0, chroma),
+        _ => (chroma, 0.0, x),
+    };
+    let m = lightness - chroma / 2.0;
+    let byte = |v: f32| ((v + m) * 255.0).round() as u8;
+    (byte(r), byte(g), byte(b))
+}
+
+/// RomM's 0-100 rating as stars out of five in halves, or -1 when the game has none.
+pub fn stars(rating: Option<f64>) -> f32 {
+    match rating.filter(|r| *r > 0.0) {
+        Some(r) => ((r / 20.0).clamp(0.0, 5.0) * 2.0).round() as f32 / 2.0,
+        None => -1.0,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,5 +357,78 @@ mod tests {
         assert!(already_fullscreen.toggle(true));
         assert!(already_fullscreen.toggle(true));
         assert!(!already_fullscreen.active());
+    }
+    #[test]
+    fn buttons_mean_different_things_on_each_page() {
+        use crate::input::{A, L2, X, Y};
+        assert_eq!(Action::from_button(Page::Games, A), Some(Action::Accept));
+        assert_eq!(Action::from_button(Page::Systems, X), Some(Action::Search));
+        assert_eq!(Action::from_button(Page::Games, X), Some(Action::Favorite));
+        assert_eq!(Action::from_button(Page::Systems, Y), Some(Action::Random));
+        assert_eq!(Action::from_button(Page::Games, Y), Some(Action::Resume));
+        assert_eq!(Action::from_button(Page::Game, Y), Some(Action::Download));
+        assert_eq!(Action::from_button(Page::Games, L2), Some(Action::JumpBack));
+        assert_eq!(Action::from_button(Page::Systems, L2), None);
+    }
+
+    #[test]
+    fn keys_map_to_actions() {
+        use slint::platform::Key;
+        let key = |k: Key| char::from(k).to_string();
+        assert_eq!(
+            Action::from_key(&key(Key::UpArrow), false),
+            Some(Action::Up)
+        );
+        assert_eq!(
+            Action::from_key(&key(Key::Escape), false),
+            Some(Action::Back)
+        );
+        assert_eq!(
+            Action::from_key(&key(Key::PageDown), false),
+            Some(Action::Next)
+        );
+        assert_eq!(Action::from_key("/", false), Some(Action::Search));
+        assert_eq!(Action::from_key("f", true), Some(Action::Search));
+        assert_eq!(Action::from_key("f", false), Some(Action::Favorite));
+        assert_eq!(Action::from_key("q", false), None);
+        assert_eq!(Action::from_key("", false), None);
+        assert_eq!(Action::from_key("fm", false), None);
+    }
+
+    #[test]
+    fn letter_jumps_land_on_the_first_game_of_a_letter() {
+        let titles = [
+            "1942",
+            "007",
+            "Advance Wars",
+            "Aero",
+            "Bomber",
+            "Bust",
+            "Castlevania",
+        ];
+        assert_eq!(letter_jump(&titles, 0, true), Some(2));
+        assert_eq!(letter_jump(&titles, 2, true), Some(4));
+        assert_eq!(letter_jump(&titles, 3, false), Some(2));
+        assert_eq!(letter_jump(&titles, 2, false), Some(0));
+        assert_eq!(letter_jump(&titles, 0, false), None);
+        assert_eq!(letter_jump(&titles, 6, true), None);
+        assert_eq!(letter_jump(&titles, 6, false), Some(4));
+        assert_eq!(letter_jump::<&str>(&[], 0, true), None);
+    }
+
+    #[test]
+    fn a_console_keeps_its_colour() {
+        assert_eq!(system_tint("gba"), system_tint("gba"));
+        assert_ne!(system_tint("gba"), system_tint("snes"));
+    }
+
+    #[test]
+    fn ratings_become_half_stars() {
+        assert_eq!(stars(None), -1.0);
+        assert_eq!(stars(Some(0.0)), -1.0);
+        assert_eq!(stars(Some(89.0)), 4.5);
+        assert_eq!(stars(Some(100.0)), 5.0);
+        assert_eq!(stars(Some(250.0)), 5.0);
+        assert_eq!(stars(Some(50.0)), 2.5);
     }
 }

@@ -115,6 +115,8 @@ impl SortOrder {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GameFilter {
     pub scope: Scope,
+    /// Limits any scope to one console.
+    pub platform: Option<i64>,
     pub search: String,
     pub downloaded_only: bool,
     pub sort: SortOrder,
@@ -663,10 +665,10 @@ impl Store {
             .expect("prepare");
         let (platform, collection) = match &filter.scope {
             Scope::All | Scope::Recent | Scope::ForYou | Scope::NowPlaying | Scope::Backlog => {
-                (None, None)
+                (filter.platform, None)
             }
             Scope::Platform(id) => (Some(*id), None),
-            Scope::Collection(key) => (None, Some(key.as_str())),
+            Scope::Collection(key) => (filter.platform, Some(key.as_str())),
         };
         let recent = filter.scope == Scope::Recent;
         let for_you = filter.scope == Scope::ForYou;
@@ -923,7 +925,6 @@ impl Store {
             .ok()
     }
 
-    #[cfg(test)]
     pub fn last_played(&self, id: i64) -> Option<i64> {
         self.conn
             .query_row("SELECT last_played FROM games WHERE id = ?1", [id], |r| {
@@ -1474,6 +1475,50 @@ mod tests {
         });
         assert_eq!(g.len(), 1);
         assert_eq!(g[0].title, "Tetris DX");
+    }
+
+    #[test]
+    fn a_platform_limits_any_scope() {
+        let mut s = Store::open_in_memory().unwrap();
+        s.replace_platforms(&[
+            Platform {
+                id: 1,
+                slug: "snes".into(),
+                display_name: "SNES".into(),
+                rom_count: 2,
+                category: None,
+                abbreviation: String::new(),
+                alternative_names: Vec::new(),
+            },
+            Platform {
+                id: 2,
+                slug: "gb".into(),
+                display_name: "Game Boy".into(),
+                rom_count: 1,
+                category: None,
+                abbreviation: String::new(),
+                alternative_names: Vec::new(),
+            },
+        ]);
+        s.upsert_games(&[
+            played(1, 1, "Mario", "t", Some("2026-09-01T00:00:00Z")),
+            played(2, 2, "Tetris", "t", Some("2026-09-02T00:00:00Z")),
+            played(3, 1, "Zelda", "t", None),
+        ]);
+        let ids_in = |scope: Scope, platform: Option<i64>| {
+            ids(
+                &s,
+                GameFilter {
+                    scope,
+                    platform,
+                    ..GameFilter::default()
+                },
+            )
+        };
+        assert_eq!(ids_in(Scope::All, Some(1)), [1, 3]);
+        assert_eq!(ids_in(Scope::Recent, None), [2, 1]);
+        assert_eq!(ids_in(Scope::Recent, Some(1)), [1]);
+        assert_eq!(ids_in(Scope::All, None).len(), 3);
     }
 
     #[test]

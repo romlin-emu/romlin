@@ -43,6 +43,7 @@ Download the [latest release](https://github.com/romlin-emu/romlin/releases/late
 - **In-game menu:** pause, restart, save slots, changing discs, volume and full screen, from the Guide button or Esc.
 - **Two-screen Nintendo DS:** a window per screen, with the mouse as the touch pen.
 - **Picks up where you left off:** the last console, game and scroll position, and the size and position of every window.
+- **Full screen mode:** F11 in the library switches to a full-screen, controller-first view: pick a console, browse its games by All, Favorites, On device and Recently played with each game's details beside the list, open a game's page or menu, and play. The Esc key or B goes back, and F11 leaves.
 - **Interface sizes:** 1x, 1.5x or 2x.
 
 ## Supported systems

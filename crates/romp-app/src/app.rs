@@ -149,11 +149,16 @@ struct Controller {
     remap_device: RefCell<Option<String>>,
     remap_waiting: Cell<Option<u32>>,
     nav_card: Cell<Option<usize>>,
-    fullscreen: Cell<crate::fullscreen::Mode>,
+    fullscreen: RefCell<fullscreen::State>,
+    /// Waits for the focused game to settle before its details load.
+    detail_timer: Timer,
     /// Columns the library window's grid fits; fullscreen mode uses its layout's instead.
     grid_columns: Cell<usize>,
     nav_repeat: RefCell<crate::navigation::Repeater>,
     pad_hints: RefCell<Vec<navigation::Hint>>,
+    fullscreen_hints: RefCell<(Vec<navigation::Hint>, Vec<navigation::Hint>)>,
+    /// The controller family in use, when one is.
+    pad_family: Cell<Option<crate::pad_labels::Family>>,
     nav_timer: RefCell<Option<Timer>>,
     restore_view: RefCell<Option<LastView>>,
     pending_top: Cell<Option<(i64, Instant)>>,
@@ -269,10 +274,13 @@ pub fn run(game_mode: bool) -> anyhow::Result<()> {
         remap_device: RefCell::new(None),
         remap_waiting: Cell::new(None),
         nav_card: Cell::new(None),
-        fullscreen: Cell::default(),
+        fullscreen: RefCell::default(),
+        detail_timer: Timer::default(),
         grid_columns: Cell::new(1),
         nav_repeat: RefCell::default(),
         pad_hints: RefCell::default(),
+        fullscreen_hints: RefCell::default(),
+        pad_family: Cell::new(None),
         nav_timer: RefCell::new(None),
         restore_view: RefCell::new(last_view),
         pending_top: Cell::new(None),
@@ -422,16 +430,24 @@ impl Controller {
         ui.on_row_shown(|i| with_controller(|c| c.row_shown(i.max(0) as usize)));
         ui.on_refresh(|| with_controller(|c| c.sync()));
         ui.on_surprise_me(|| with_controller(|c| c.surprise()));
-        ui.on_fullscreen_exit(|| with_controller(|c| c.toggle_fullscreen_mode()));
-        ui.on_fullscreen_move(|delta| with_controller(|c| c.move_fullscreen_row(delta)));
-        ui.on_fullscreen_tab_step(|delta| with_controller(|c| c.step_fullscreen_tab(delta)));
+        ui.on_fullscreen_key(|text, ctrl| {
+            let mut handled = false;
+            with_controller(|c| handled = c.fullscreen_key_pressed(text.as_str(), ctrl));
+            handled
+        });
+        ui.on_fullscreen_system_chosen(|i| {
+            with_controller(|c| c.choose_system(i.max(0) as usize));
+        });
         ui.on_fullscreen_tab_chosen(|i| {
             with_controller(|c| c.choose_fullscreen_tab(crate::fullscreen::Tab::from_index(i)));
         });
-        ui.on_fullscreen_focus(|i| {
-            with_controller(|c| c.focus_card(usize::try_from(i).ok()));
-        });
+        ui.on_fullscreen_row_chosen(|i| with_controller(|c| c.choose_row(i.max(0) as usize)));
         ui.on_fullscreen_play(|| with_controller(|c| c.play_focused()));
+        ui.on_fullscreen_resume(|| with_controller(|c| c.resume_focused()));
+        ui.on_fullscreen_open_page(|| with_controller(|c| c.open_focused_page()));
+        ui.on_fullscreen_menu_chosen(|i| with_controller(|c| c.run_menu(i.max(0) as usize)));
+        ui.on_fullscreen_menu_dismissed(|| with_controller(|c| c.dismiss_menu()));
+        ui.on_fullscreen_search_submitted(|| with_controller(|c| c.submit_search()));
         ui.on_open_game(|id| with_controller(|c| c.open_game(i64::from(id))));
         ui.on_back_to_library(|| with_controller(|c| c.back_to_library()));
         crate::mouse::on_back_button(|id| with_controller(|c| c.mouse_back(id)));
@@ -920,7 +936,7 @@ impl Controller {
     }
 
     fn apply_columns(&self) {
-        let columns = if self.fullscreen.get().active() {
+        let columns = if self.fullscreen_active() {
             self.prefs.get().game_list_layout.columns
         } else {
             self.grid_columns.get()
@@ -983,6 +999,7 @@ impl Controller {
         let games = self.shared.store.lock().unwrap().games(&filter);
         if self.library.borrow().games == games {
             self.update_heading();
+            self.fullscreen_games_reloaded();
             return;
         }
         if let Some(i) = self.nav_card.get() {
@@ -992,6 +1009,7 @@ impl Controller {
         self.library.borrow_mut().games = games;
         self.rebuild_rows();
         self.update_heading();
+        self.fullscreen_games_reloaded();
         if let Some((id, until)) = self.pending_top.get() {
             if Instant::now() < until {
                 self.scroll_to_game(id);

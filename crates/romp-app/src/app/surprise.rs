@@ -1,14 +1,14 @@
 use super::Controller;
 
 /// A game from `ids` by `roll`, other than `last` while there's another to pick.
-fn pick(ids: &[i64], last: Option<i64>, roll: u64) -> Option<i64> {
+pub(super) fn pick(ids: &[i64], last: Option<i64>, roll: u64) -> Option<i64> {
     let others: Vec<i64> = ids.iter().copied().filter(|&id| Some(id) != last).collect();
     let from = if others.is_empty() { ids } else { &others };
     let index = usize::try_from(roll % from.len().max(1) as u64).ok()?;
     from.get(index).copied()
 }
 
-fn roll() -> u64 {
+pub(super) fn roll() -> u64 {
     let mut bytes = [0; 8];
     getrandom::fill(&mut bytes).expect("system random numbers");
     u64::from_le_bytes(bytes)

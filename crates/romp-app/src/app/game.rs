@@ -102,9 +102,20 @@ impl Controller {
     }
 
     pub(super) fn open_game(&self, id: i64) {
+        if self.load_game(id) {
+            if let Some(ui) = self.ui() {
+                ui.set_screen(SCREEN_GAME);
+            }
+            self.refresh_chrome();
+        }
+    }
+
+    /// Makes `id` the current game, with everything its page and details show, without going
+    /// to its page. False when the game isn't in the library.
+    pub(super) fn load_game(&self, id: i64) -> bool {
         self.clear_conflict();
         let Some(detail) = self.shared.store.lock().unwrap().game(id) else {
-            return;
+            return false;
         };
         let local = self.local_shots(id);
         let offset = local.len();
@@ -136,7 +147,6 @@ impl Controller {
             ui.set_game_status("".into());
             ui.set_game_shots(ModelRc::from(shots));
             ui.set_game_similar(ModelRc::from(similar));
-            ui.set_screen(SCREEN_GAME);
         }
         self.load_game_cover(&detail);
         self.load_screenshots(&detail, offset);
@@ -145,6 +155,7 @@ impl Controller {
         self.load_play_stats(id);
         self.load_similar(id);
         self.load_file_choices(id);
+        true
     }
 
     pub(super) fn with_game<T>(&self, id: i64, f: impl FnOnce(&GameState) -> T) -> Option<T> {
@@ -394,6 +405,42 @@ impl Controller {
                 .into(),
         );
         ui.set_game_subtitle(details::subtitle(&detail).into());
+        ui.set_game_platform(detail.platform.clone().into());
+        ui.set_game_genre(
+            detail
+                .meta
+                .genres
+                .first()
+                .map(|g| g.to_uppercase())
+                .unwrap_or_default()
+                .into(),
+        );
+        ui.set_game_credit(details::credit(&detail).into());
+        ui.set_game_players(
+            detail
+                .meta
+                .player_count
+                .as_deref()
+                .and_then(details::players)
+                .unwrap_or_default()
+                .into(),
+        );
+        ui.set_game_rating(crate::fullscreen::stars(detail.meta.average_rating));
+        ui.set_game_score(
+            detail
+                .meta
+                .average_rating
+                .filter(|r| *r > 0.0)
+                .map(|r| format!("{} / 100", r.round()))
+                .unwrap_or_default()
+                .into(),
+        );
+        ui.set_game_size(if detail.size_bytes > 0 {
+            details::human_size(detail.size_bytes).into()
+        } else {
+            SharedString::default()
+        });
+        ui.set_game_core(details::emulator_name(&detail.platform_slug).into());
         let reason = self.shared.store.lock().unwrap().reason(detail.id);
         ui.set_game_reason(reason.unwrap_or_default().into());
         ui.set_game_cover_aspect(details::box_aspect(&detail.platform_slug));
@@ -500,6 +547,7 @@ impl Controller {
             ui.set_screen(SCREEN_LIBRARY);
         }
         self.reload_games();
+        self.refresh_chrome();
     }
 
     pub(super) fn download_game(&self) {
@@ -740,7 +788,7 @@ impl Controller {
             return;
         }
         self.requested_slot.set(slot);
-        self.preparing.set(true);
+        self.set_preparing(true);
         ui.set_game_status(tr!("Getting ready…").into());
         let cores = self.shared.cores.clone();
         let http = self.shared.http.clone();
@@ -833,7 +881,7 @@ impl Controller {
     }
 
     fn play_with_xemu(&self, detail: GameDetail, rom: PathBuf) {
-        self.preparing.set(true);
+        self.set_preparing(true);
         self.game_status(detail.id, tr!("Getting ready…"));
         let http = self.shared.http.clone();
         let client = self.client.borrow().clone();
@@ -884,7 +932,7 @@ impl Controller {
         ready: Result<(PathBuf, PathBuf), String>,
         missing: Vec<String>,
     ) {
-        self.preparing.set(false);
+        self.set_preparing(false);
         let (exe, template) = match ready {
             Ok(paths) => paths,
             Err(e) => return self.game_status(detail.id, e),
@@ -955,7 +1003,7 @@ impl Controller {
     }
 
     fn play_with_eden(&self, detail: GameDetail, rom: PathBuf) {
-        self.preparing.set(true);
+        self.set_preparing(true);
         self.game_status(detail.id, tr!("Getting ready…"));
         let http = self.shared.http.clone();
         let client = self.client.borrow().clone();
@@ -1023,7 +1071,7 @@ impl Controller {
             on_ui(move |c| {
                 if let Some(Err(e)) = &sram {
                     if !matches!(e, Error::Unreachable) {
-                        c.preparing.set(false);
+                        c.set_preparing(false);
                         return c.game_status(id, tr!("Couldn't sync saves: {e}.", e));
                     }
                 }
@@ -1033,7 +1081,7 @@ impl Controller {
     }
 
     fn launch_eden(&self, detail: GameDetail, rom: PathBuf, ready: Result<PathBuf, String>) {
-        self.preparing.set(false);
+        self.set_preparing(false);
         let exe = match ready {
             Ok(exe) => exe,
             Err(e) => return self.game_status(detail.id, e),
@@ -1090,7 +1138,7 @@ impl Controller {
     }
 
     fn play_with_rpcs3(&self, detail: GameDetail, rom: PathBuf) {
-        self.preparing.set(true);
+        self.set_preparing(true);
         self.game_status(detail.id, tr!("Getting ready…"));
         let http = self.shared.http.clone();
         let client = self.client.borrow().clone();
@@ -1152,7 +1200,7 @@ impl Controller {
         ready: Result<PathBuf, String>,
         missing: Vec<String>,
     ) {
-        self.preparing.set(false);
+        self.set_preparing(false);
         let exe = match ready {
             Ok(exe) => exe,
             Err(e) => return self.game_status(detail.id, e),
@@ -1429,12 +1477,12 @@ impl Controller {
                     error = %e,
                     "game preparation failed"
                 );
-                self.preparing.set(false);
+                self.set_preparing(false);
                 return self.game_status(detail.id, e);
             }
         };
         if !missing.is_empty() {
-            self.preparing.set(false);
+            self.set_preparing(false);
             return self.game_status(detail.id, bios::missing_message(&missing));
         }
         match sram {
@@ -1495,7 +1543,7 @@ impl Controller {
             });
             return;
         }
-        self.preparing.set(false);
+        self.set_preparing(false);
         let save_dir = self.game_saves(&detail).map_or_else(
             || paths::game_save_dir(&paths::data_dir(), &self.server(), detail.id),
             |game| game.dir,

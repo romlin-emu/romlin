@@ -55,30 +55,50 @@ impl Controller {
 
     fn update_pad_hints(&self, family: Option<Family>) {
         let Some(ui) = self.ui() else { return };
+        if self.pad_family.replace(family) != family {
+            self.show_fullscreen_hints();
+        }
         let hints = match family {
-            Some(family) if !ui.get_dialog_open() && !ui.get_remap_open() => {
-                if ui.get_fullscreen_active() {
-                    fullscreen_hints(family)
-                } else {
-                    hints(ui.get_screen(), family, shoulder_menu(&ui))
-                }
+            Some(family)
+                if !ui.get_dialog_open() && !ui.get_remap_open() && !ui.get_fullscreen_active() =>
+            {
+                hints(ui.get_screen(), family, shoulder_menu(&ui))
             }
             _ => Vec::new(),
         };
         if *self.pad_hints.borrow() == hints {
             return;
         }
-        let rows: Vec<crate::PadHint> = hints
-            .iter()
-            .map(|(keys, action)| crate::PadHint {
-                keys: ModelRc::new(VecModel::from(
-                    keys.iter().map(|k| pad_key(*k)).collect::<Vec<_>>(),
-                )),
-                action: translate(action).into(),
-            })
-            .collect();
-        ui.set_pad_hints(ModelRc::new(VecModel::from(rows)));
+        ui.set_pad_hints(hint_rows(&hints));
         *self.pad_hints.borrow_mut() = hints;
+    }
+
+    /// Fullscreen mode's hint bar: the keys of the controller in use, or the keyboard's.
+    pub(super) fn show_fullscreen_hints(&self) {
+        let Some(ui) = self.ui() else { return };
+        if !ui.get_fullscreen_active() {
+            return;
+        }
+        let screen = if self.preparing.get() {
+            HintScreen::Launching
+        } else if ui.get_fullscreen_menu_open() {
+            HintScreen::Menu
+        } else if ui.get_fullscreen_search_open() {
+            HintScreen::Search
+        } else if ui.get_screen() == SCREEN_GAME {
+            HintScreen::Game
+        } else if ui.get_fullscreen_view() == 0 {
+            HintScreen::Systems
+        } else {
+            HintScreen::Games
+        };
+        let hints = fullscreen_hints(screen, self.pad_family.get());
+        if *self.fullscreen_hints.borrow() == hints {
+            return;
+        }
+        ui.set_fullscreen_hints_start(hint_rows(&hints.0));
+        ui.set_fullscreen_hints_end(hint_rows(&hints.1));
+        *self.fullscreen_hints.borrow_mut() = hints;
     }
 
     pub(super) fn mouse_back(&self, window: slint::winit_030::winit::window::WindowId) {
@@ -176,20 +196,6 @@ impl Controller {
             }
             _ => {}
         }
-    }
-
-    /// Fullscreen mode's own buttons; false leaves the rest to the library's.
-    fn fullscreen_button(&self, button: u32) -> bool {
-        match button {
-            A => self.play_focused(),
-            B => self.toggle_fullscreen_mode(),
-            L | LEFT | R | RIGHT => {
-                let shoulder = if matches!(button, L | LEFT) { L } else { R };
-                self.step_fullscreen_tab(tab_step(shoulder, crate::i18n::rtl()));
-            }
-            _ => return false,
-        }
-        true
     }
 
     pub(super) fn move_card(&self, dir: Dir) {
@@ -378,20 +384,123 @@ fn hints(screen: i32, family: Family, menu: Option<Menu>) -> Vec<Hint> {
     }
 }
 
-fn fullscreen_hints(family: Family) -> Vec<Hint> {
-    let key = |button: Button| badge(family, button);
-    vec![
-        (
-            vec![Badge::Text(gettext_noop!("D-pad"))],
-            gettext_noop!("Move"),
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HintScreen {
+    Systems,
+    Games,
+    Game,
+    Menu,
+    Search,
+    Launching,
+}
+
+/// The hints of a fullscreen page: those at the bar's start, then those at its end. Without a
+/// controller they name the keyboard's keys.
+type FullscreenHints = (Vec<Hint>, Vec<Hint>);
+
+fn fullscreen_hints(screen: HintScreen, family: Option<Family>) -> FullscreenHints {
+    let (confirm, back) = family.map_or((Button::South, Button::East), |f| (f.confirm(), f.back()));
+    let key = |button: Button, text: &'static str| {
+        vec![match family {
+            Some(family) => badge(family, button),
+            None => Badge::Text(text),
+        }]
+    };
+    let pair = |a: (Button, &'static str), b: (Button, &'static str)| {
+        let mut keys = key(a.0, a.1);
+        keys.extend(key(b.0, b.1));
+        keys
+    };
+    let shoulders = pair(
+        (Button::LeftTrigger, "PgUp"),
+        (Button::RightTrigger, "PgDn"),
+    );
+    let menu = key(Button::Start, "M");
+    let open = (key(confirm, "Enter"), gettext_noop!("Open"));
+    let play = (key(confirm, "Enter"), gettext_noop!("Play"));
+    let select = (key(confirm, "Enter"), gettext_noop!("Select"));
+    let favorite = (key(Button::North, "F"), gettext_noop!("Favorite"));
+    match screen {
+        HintScreen::Systems => (
+            vec![
+                (shoulders, gettext_noop!("System")),
+                (menu, gettext_noop!("Menu")),
+            ],
+            vec![
+                (key(Button::North, "/"), gettext_noop!("Search")),
+                (key(Button::West, "X"), gettext_noop!("Random game")),
+                (key(back, "Esc"), gettext_noop!("Exit")),
+                open,
+            ],
         ),
-        (
-            vec![key(Button::LeftTrigger), key(Button::RightTrigger)],
-            gettext_noop!("Change list"),
+        HintScreen::Games => (
+            vec![
+                (shoulders, gettext_noop!("Change list")),
+                (
+                    pair(
+                        (Button::LeftTrigger2, "Home"),
+                        (Button::RightTrigger2, "End"),
+                    ),
+                    gettext_noop!("Jump A-Z"),
+                ),
+                (menu, gettext_noop!("Game menu")),
+            ],
+            vec![
+                favorite,
+                (key(Button::West, "R"), gettext_noop!("Resume")),
+                (key(back, "Esc"), gettext_noop!("Back")),
+                play,
+            ],
         ),
-        (vec![key(family.back())], gettext_noop!("Exit full screen")),
-        (vec![key(family.confirm())], gettext_noop!("Play")),
-    ]
+        HintScreen::Game => (
+            vec![
+                (shoulders, gettext_noop!("Previous / next game")),
+                (menu, gettext_noop!("Game menu")),
+            ],
+            vec![
+                favorite,
+                (key(Button::West, "D"), gettext_noop!("Download")),
+                (key(back, "Esc"), gettext_noop!("Back")),
+                play,
+            ],
+        ),
+        HintScreen::Menu => (
+            Vec::new(),
+            vec![(key(back, "Esc"), gettext_noop!("Close")), select],
+        ),
+        HintScreen::Search => (
+            Vec::new(),
+            vec![
+                (key(back, "Esc"), gettext_noop!("Clear")),
+                (key(confirm, "Enter"), gettext_noop!("Done")),
+            ],
+        ),
+        HintScreen::Launching => (
+            vec![(
+                vec![Badge::Text(gettext_noop!("TIP"))],
+                if family.is_some() {
+                    gettext_noop!("Select and Start together open the game menu")
+                } else {
+                    gettext_noop!("Esc opens the game menu")
+                },
+            )],
+            Vec::new(),
+        ),
+    }
+}
+
+fn hint_rows(hints: &[Hint]) -> ModelRc<crate::PadHint> {
+    ModelRc::new(VecModel::from(
+        hints
+            .iter()
+            .map(|(keys, action)| crate::PadHint {
+                keys: ModelRc::new(VecModel::from(
+                    keys.iter().map(|k| pad_key(*k)).collect::<Vec<_>>(),
+                )),
+                action: translate(action).into(),
+            })
+            .collect::<Vec<_>>(),
+    ))
 }
 
 fn pad_key(badge: Badge) -> crate::PadKey {

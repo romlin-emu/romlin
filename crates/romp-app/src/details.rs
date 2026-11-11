@@ -149,6 +149,35 @@ pub fn subtitle(detail: &GameDetail) -> String {
         .join(" · ")
 }
 
+/// Who made a game, as the developer, the publisher when it's another company, and the year.
+pub fn credit(detail: &GameDetail) -> String {
+    let meta = &detail.meta;
+    let developer = meta.developers.first().or_else(|| meta.companies.first());
+    let publisher = meta.publishers.first().filter(|p| Some(*p) != developer);
+    let year = release_ms(detail)
+        .and_then(date_parts)
+        .map(|(y, _, _)| y.to_string());
+    developer
+        .cloned()
+        .into_iter()
+        .chain(publisher.cloned())
+        .chain(year)
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
+/// The emulator a platform's games run on, for the player to see.
+pub fn emulator_name(platform_slug: &str) -> String {
+    match platform_slug {
+        crate::eden::PLATFORM => "Eden".into(),
+        crate::xemu::PLATFORM => "xemu".into(),
+        crate::rpcs3::PLATFORM => "RPCS3".into(),
+        slug => crate::cores::core_for_platform(slug)
+            .map(|core| core.name.to_string())
+            .unwrap_or_default(),
+    }
+}
+
 fn list(one: &'static str, many: &'static str, items: &[String]) -> Option<(&'static str, String)> {
     match items.len() {
         0 => None,
@@ -353,5 +382,37 @@ mod tests {
         assert_eq!(human_size(46_857), "46.9 KB");
         assert_eq!(human_size(627_135_698), "627.1 MB");
         assert_eq!(human_size(4_700_000_000), "4.7 GB");
+    }
+
+    #[test]
+    fn a_credit_names_the_developer_publisher_and_year() {
+        let meta = |developers: &[&str], publishers: &[&str], first_release_date| RomMetadata {
+            developers: developers.iter().map(ToString::to_string).collect(),
+            publishers: publishers.iter().map(ToString::to_string).collect(),
+            first_release_date,
+            ..RomMetadata::default()
+        };
+        let year_2003 = Some(1_050_000_000_000);
+        assert_eq!(
+            credit(&detail(meta(
+                &["Intelligent Systems"],
+                &["Nintendo"],
+                year_2003
+            ))),
+            "Intelligent Systems · Nintendo · 2003"
+        );
+        assert_eq!(
+            credit(&detail(meta(&["Nintendo"], &["Nintendo"], None))),
+            "Nintendo"
+        );
+        assert_eq!(credit(&detail(meta(&[], &[], None))), "");
+    }
+
+    #[test]
+    fn an_emulator_is_named_for_the_player() {
+        assert_eq!(emulator_name("switch"), "Eden");
+        assert_eq!(emulator_name("ps3"), "RPCS3");
+        assert_eq!(emulator_name("not-a-console"), "");
+        assert!(!emulator_name("gba").is_empty());
     }
 }

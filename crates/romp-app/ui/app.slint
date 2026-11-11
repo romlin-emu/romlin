@@ -2,7 +2,7 @@ import { ListView, Locale, Row, ScrollView, Theme } from "theme.slint";
 import { Button, CheckBox, ComboBox, FocusRing, KeyActivator, LineEdit, Slider, Switch } from "focus.slint";
 import { AchievementItem, AchievementRow } from "achievements.slint";
 import { SlotCard, SlotPicture } from "slots.slint";
-import { GameCard, GameRow, ListDetailLayout } from "fullscreen.slint";
+import { AppTile, FsGame, FullscreenView, GameCard, GameRow, MenuRow, PadBadge, PadHint, PadKey, Shot, SystemCard } from "fullscreen.slint";
 import { Palette, ProgressIndicator, Spinner } from "std-widgets.slint";
 
 export struct SidebarEntry { header: bool, key: string, name: string, initial: string, count: int, icon: image, has-icon: bool, glyph: string, expanded: bool, can-add: bool, editable: bool, note: bool }
@@ -18,37 +18,8 @@ export struct ConsoleGroup { name: string, options: [ConsoleOption] }
 export struct LookSetting { label: string, choices: [string], current: int }
 export struct LookConsole { slug: string, name: string, settings: [LookSetting] }
 export struct KeyHint { keys: string, action: string }
-export struct PadKey { text: string, shape: string }
-export struct PadHint { keys: [PadKey], action: string }
 export struct RemapRow { name: string, binding: string, waiting: bool }
 export struct Fact { label: string, value: string }
-export struct Shot { image: image, loaded: bool }
-
-/// A controller button in a hint: its printed label, or a PlayStation symbol.
-component PadBadge inherits Rectangle {
-    in property <PadKey> key;
-    height: 20px;
-    width: max(20px, badge-text.preferred-width + 10px);
-    border-radius: 10px;
-    border-width: 1px;
-    border-color: Theme.border-subtle;
-    background: Theme.hover;
-    badge-text := Text { horizontal-alignment: Locale.start;
-        text: root.key.shape == "" ? root.key.text : "";
-        font-size: Theme.font-caption;
-        font-weight: 600;
-        color: Theme.text-secondary;
-    }
-    if root.key.shape != "": Image {
-        width: 12px;
-        height: 12px;
-        colorize: Theme.text-secondary;
-        source: root.key.shape == "cross" ? @image-url("icons/pad-cross.svg")
-            : root.key.shape == "circle" ? @image-url("icons/pad-circle.svg")
-            : root.key.shape == "square" ? @image-url("icons/pad-square.svg")
-            : @image-url("icons/pad-triangle.svg");
-    }
-}
 
 export global Brand {
     out property <string> name: "Romlin";
@@ -57,23 +28,6 @@ export global Brand {
     out property <string> author: "Romlin contributors · based on RomP by Beshr Kayali Reinholdsson";
     out property <string> author-website: "https://github.com/romlin-emu";
     out property <string> tagline: @tr("Play your RomM library, each game in its own sandboxed emulator.");
-}
-
-component AppTile inherits Rectangle {
-    in property <image> icon;
-    in property <bool> has-icon;
-    in property <length> size: 32px;
-    width: root.size;
-    height: root.size;
-    border-radius: root.size * 0.25;
-    clip: true;
-    background: @linear-gradient(135deg, Theme.accent-hover 0%, Theme.accent-pressed 100%);
-    if root.has-icon: Image { source: root.icon; width: parent.width; height: parent.height; }
-    if !root.has-icon: Text { horizontal-alignment: Locale.start;
-        text: "▶";
-        color: Theme.text-strong;
-        font-size: root.size * 0.42;
-    }
 }
 
 component IconButton inherits Rectangle {
@@ -2967,131 +2921,6 @@ component AboutDialog inherits Rectangle {
     }
 }
 
-// Fullscreen mode: a top bar, the filter tabs, the chosen game list layout and a hint bar.
-component FullscreenView inherits FocusScope {
-    in property <bool> modal-open;
-    in property <string> layout;
-    in property <string> brand;
-    in property <image> app-icon;
-    in property <bool> has-app-icon;
-    in property <string> heading;
-    in property <[GameRow]> rows;
-    in property <int> focus-row: -1;
-    in property <int> tab: -1;
-    in property <int> sort-index;
-    in property <string> empty-text;
-    in property <[PadHint]> pad-hints;
-    callback exit();
-    callback move(int);
-    callback step-tab(int);
-    callback choose-tab(int);
-    callback choose-row(int);
-    callback row-shown(int);
-    callback play();
-
-    focus-on-tab-navigation: false;
-    init => { root.focus(); }
-    changed modal-open => { if !root.modal-open { root.focus(); } }
-    key-pressed(event) => {
-        if event.text == Key.Escape { root.exit(); return accept; }
-        if event.text == Key.UpArrow { root.move(-1); return accept; }
-        if event.text == Key.DownArrow { root.move(1); return accept; }
-        if event.text == Key.LeftArrow { root.step-tab(Locale.rtl ? 1 : -1); return accept; }
-        if event.text == Key.RightArrow { root.step-tab(Locale.rtl ? -1 : 1); return accept; }
-        if event.text == Key.Return { root.play(); return accept; }
-        return reject;
-    }
-
-    Rectangle {
-        background: Theme.background;
-        VerticalLayout {
-            padding-top: 20px;
-            padding-bottom: 12px;
-            spacing: 18px;
-            HorizontalLayout {
-                padding-left: 32px;
-                padding-right: 32px;
-                spacing: 12px;
-                alignment: start;
-                AppTile { icon: root.app-icon; has-icon: root.has-app-icon; }
-                Text { text: root.brand; color: Theme.text-strong; font-size: Theme.font-subtitle; font-weight: 800; vertical-alignment: center; }
-                Rectangle { width: 1px; background: Theme.border-subtle; }
-                Text { text: root.heading; color: Theme.text-strong; font-size: Theme.font-subtitle; font-weight: 600; vertical-alignment: center; }
-            }
-            HorizontalLayout {
-                padding-left: 32px;
-                padding-right: 32px;
-                spacing: 8px;
-                for name[i] in [@tr("All"), @tr("Favorites"), @tr("On device"), @tr("Recently played")]: Rectangle {
-                    width: tab-label.preferred-width + 28px;
-                    height: 32px;
-                    border-radius: 16px;
-                    background: i == root.tab ? Theme.surface-selected : tab-touch.has-hover ? Theme.hover : transparent;
-                    accessible-role: button;
-                    accessible-label: name;
-                    accessible-checkable: true;
-                    accessible-checked: i == root.tab;
-                    accessible-action-default => { root.choose-tab(i); }
-                    tab-label := Text {
-                        text: name;
-                        color: i == root.tab ? Theme.text-strong : Theme.text-secondary;
-                        font-size: Theme.font-body-large;
-                        font-weight: i == root.tab ? 600 : 400;
-                        horizontal-alignment: center;
-                        vertical-alignment: center;
-                    }
-                    tab-touch := TouchArea { clicked => { root.choose-tab(i); } }
-                }
-                Rectangle { horizontal-stretch: 1; }
-                Text {
-                    text: [@tr("Name"), @tr("Date added"), @tr("Last played")][root.sort-index];
-                    color: Theme.text-muted;
-                    font-size: Theme.font-body;
-                    vertical-alignment: center;
-                }
-            }
-            Rectangle {
-                vertical-stretch: 1;
-                if root.layout == "list-detail": ListDetailLayout {
-                    rows: root.rows;
-                    focus-row: root.focus-row;
-                    empty-text: root.empty-text;
-                    row-shown(i) => { root.row-shown(i); }
-                    choose-row(i) => { root.choose-row(i); }
-                    play => { root.play(); }
-                }
-            }
-            HorizontalLayout {
-                padding-left: 32px;
-                padding-right: 32px;
-                spacing: 18px;
-                alignment: end;
-                if root.pad-hints.length == 0: HorizontalLayout {
-                    spacing: 18px;
-                    for hint in [
-                        { keys: "↑ ↓", action: @tr("Move") },
-                        { keys: "← →", action: @tr("Change list") },
-                        { keys: "Enter", action: @tr("Play") },
-                        { keys: "Esc", action: @tr("Exit full screen") },
-                    ]: Row {
-                        spacing: 6px;
-                        Text { text: hint.keys; color: Theme.text-strong; font-size: Theme.font-body; font-weight: 600; vertical-alignment: center; }
-                        Text { text: hint.action; color: Theme.text-muted; font-size: Theme.font-body; vertical-alignment: center; }
-                    }
-                }
-                for hint in root.pad-hints: Row {
-                    spacing: 6px;
-                    for key in hint.keys: VerticalLayout {
-                        alignment: center;
-                        PadBadge { key: key; }
-                    }
-                    Text { text: hint.action; color: Theme.text-muted; font-size: Theme.font-body; vertical-alignment: center; }
-                }
-            }
-        }
-    }
-}
-
 export component AppWindow inherits Window {
     default-font-family: Locale.font;
     title: Brand.name;
@@ -3103,21 +2932,56 @@ export component AppWindow inherits Window {
     min-height: 400px;
 
     in-out property <int> screen;
-    changed screen => { root.setup-scroll-y = 0px; }
+    changed screen => {
+        root.setup-scroll-y = 0px;
+        if root.screen != 3 { root.fullscreen-full-page = false; }
+    }
     in-out property <length> setup-scroll-y;
     in-out property <length> game-scroll-y;
     in property <bool> first-run;
     property <bool> in-library: root.screen >= 2 && root.screen <= 4;
     in property <bool> fullscreen-mode;
+    // The library's classic game page, for what fullscreen mode's own page doesn't do.
+    in-out property <bool> fullscreen-full-page;
     in property <string> fullscreen-layout;
+    // 0 shows the consoles and 1 the games of one.
+    in property <int> fullscreen-view;
+    in property <bool> fullscreen-launching;
+    in property <[SystemCard]> fullscreen-systems;
+    in property <int> fullscreen-system;
     in property <int> fullscreen-tab: -1;
-    out property <bool> fullscreen-active: root.fullscreen-mode && root.screen == 2;
-    callback fullscreen-exit();
-    callback fullscreen-move(int);
-    callback fullscreen-tab-step(int);
+    in property <[int]> fullscreen-counts;
+    in property <bool> fullscreen-detail-ready;
+    in property <bool> fullscreen-menu-open;
+    in property <[MenuRow]> fullscreen-menu;
+    in property <int> fullscreen-menu-focus;
+    in-out property <bool> fullscreen-search-open;
+    in property <[PadHint]> fullscreen-hints-start;
+    in property <[PadHint]> fullscreen-hints-end;
+    in property <string> fullscreen-heading;
+    in property <string> game-platform;
+    in property <string> game-genre;
+    in property <string> game-credit;
+    in property <string> game-players;
+    in property <float> game-rating: -1;
+    in property <string> game-score;
+    in property <string> game-size;
+    in property <string> game-last-played;
+    in property <string> game-play-time;
+    in property <int> game-save-states;
+    in property <string> game-resume;
+    in property <string> game-core;
+    out property <bool> fullscreen-active: root.fullscreen-mode && (root.screen == 2 || (root.screen == 3 && !root.fullscreen-full-page));
+    callback fullscreen-key(string, bool) -> bool;
+    callback fullscreen-system-chosen(int);
     callback fullscreen-tab-chosen(int);
-    callback fullscreen-focus(int);
+    callback fullscreen-row-chosen(int);
     callback fullscreen-play();
+    callback fullscreen-resume();
+    callback fullscreen-open-page();
+    callback fullscreen-menu-chosen(int);
+    callback fullscreen-menu-dismissed();
+    callback fullscreen-search-submitted();
     property <bool> narrow;
     in-out property <length> sidebar-width <=> library.sidebar-width;
     in-out property <bool> sidebar-collapsed <=> library.sidebar-collapsed;
@@ -3350,7 +3214,7 @@ export component AppWindow inherits Window {
     callback sort-changed(int);
     callback downloaded-only-toggled(bool);
 
-    MenuBar {
+    if !root.fullscreen-active: MenuBar {
         Menu {
             title: @tr("Library");
             MenuItem {
@@ -3625,20 +3489,66 @@ export component AppWindow inherits Window {
         brand: Brand.name;
         app-icon: root.app-icon;
         has-app-icon: root.has-app-icon;
-        heading: root.heading;
+        heading: root.fullscreen-heading;
+        offline: root.offline;
+        page: root.fullscreen-launching ? 3 : root.screen == 3 ? 2 : root.fullscreen-view;
+        systems: root.fullscreen-systems;
+        system: root.fullscreen-system;
         rows: root.rows;
         focus-row: root.grid-focus-row;
         tab: root.fullscreen-tab;
+        counts: root.fullscreen-counts;
         sort-index: root.sort-index;
         empty-text: root.syncing ? @tr("Loading your library…") : root.filters-active || root.downloaded-only ? @tr("No games match.") : @tr("No games found.");
-        pad-hints: root.pad-hints;
-        exit => { root.fullscreen-exit(); }
-        move(delta) => { root.fullscreen-move(delta); }
-        step-tab(delta) => { root.fullscreen-tab-step(delta); }
-        choose-tab(i) => { root.fullscreen-tab-chosen(i); }
-        choose-row(i) => { root.fullscreen-focus(i); }
+        game: {
+            title: root.game-title,
+            platform: root.game-platform,
+            genre: root.game-genre,
+            credit: root.game-credit,
+            players: root.game-players,
+            rating: root.game-rating,
+            score: root.game-score,
+            summary: root.game-summary,
+            cover: root.game-cover,
+            has-cover: root.has-game-cover,
+            downloaded: root.game-downloaded,
+            favorite: root.game-favorite,
+            playable: root.game-playable,
+            busy: root.game-busy,
+            progress: root.game-progress,
+            can-download: root.game-can-download,
+            last-played: root.game-last-played,
+            play-time: root.game-play-time,
+            save-states: root.game-save-states,
+            size: root.game-size,
+            resume: root.game-resume,
+            status: root.game-status,
+            core: root.game-core,
+            shots: root.game-shots,
+        };
+        detail-ready: root.fullscreen-detail-ready;
+        menu-open: root.fullscreen-menu-open;
+        menu: root.fullscreen-menu;
+        menu-focus: root.fullscreen-menu-focus;
+        search-open <=> root.fullscreen-search-open;
+        search <=> root.search;
+        hints-start: root.fullscreen-hints-start;
+        hints-end: root.fullscreen-hints-end;
+        key(text, ctrl) => { return root.fullscreen-key(text, ctrl); }
+        system-chosen(i) => { root.fullscreen-system-chosen(i); }
+        tab-chosen(i) => { root.fullscreen-tab-chosen(i); }
+        row-chosen(i) => { root.fullscreen-row-chosen(i); }
         row-shown(i) => { root.row-shown(i); }
         play => { root.fullscreen-play(); }
+        play-game => { root.play-game(); }
+        resume => { root.fullscreen-resume(); }
+        open-page => { root.fullscreen-open-page(); }
+        download => { root.download-game(); }
+        cancel => { root.cancel-download(); }
+        menu-chosen(i) => { root.fullscreen-menu-chosen(i); }
+        menu-dismissed => { root.fullscreen-menu-dismissed(); }
+        search-edited(text) => { root.search-edited(text); }
+        search-submitted => { root.fullscreen-search-submitted(); }
     }
     if root.remap-open: RemapDialog {
         title: root.remap-title;
