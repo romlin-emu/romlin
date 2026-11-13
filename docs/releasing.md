@@ -61,6 +61,13 @@ tag reachable from the built commit; `cog.toml` skips merge commits, whose branc
 commits already appear individually. Delete/create is still non-atomic if the
 service fails or a person cancels publication.
 
+To test a PR on hardware before it merges, add the `test-build` label. **Test
+build** packages it as Nightly does, with `pr-<number>` in the file names, and
+keeps the packages as that run's artifacts; each push rebuilds while the label
+stays. Nothing is published. On SteamOS, replace
+`~/Applications/Romlin/Romlin.AppImage` with the AppImage from `romlin-Linux`;
+run the installer again to return to the nightly.
+
 ## Local checks
 
 The release checks need Python 3.11+, Node 22+ with npm, and Bash, alongside the

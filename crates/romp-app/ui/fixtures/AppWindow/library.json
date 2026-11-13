@@ -1,0 +1,399 @@
+{
+  "screen": 2,
+  "server-url": "https://romm.home.arpa",
+  "server-label": "romm.home.arpa",
+  "user-label": "mira",
+  "user-initial": "M",
+  "user-avatar": "fixtures/images/avatar.png",
+  "has-user-avatar": true,
+  "heading": "All games",
+  "heading-detail": "18 games",
+  "selected-key": "all",
+  "sort-index": 1,
+  "sidebar": [
+    {
+      "key": "all",
+      "name": "All games",
+      "initial": "A",
+      "count": 18,
+      "glyph": ""
+    },
+    {
+      "key": "c:1",
+      "name": "Favorites",
+      "initial": "F",
+      "count": 3,
+      "glyph": "♥"
+    },
+    {
+      "key": "recent",
+      "name": "Recently played",
+      "initial": "R",
+      "count": 6,
+      "glyph": "",
+      "icon": "icons/recent.svg",
+      "has-icon": true
+    },
+    {
+      "key": "now-playing",
+      "name": "Now playing",
+      "initial": "N",
+      "count": 2,
+      "glyph": "",
+      "icon": "icons/gamepad.svg",
+      "has-icon": true
+    },
+    {
+      "key": "backlog",
+      "name": "Backlog",
+      "initial": "B",
+      "count": 4,
+      "glyph": "",
+      "icon": "icons/backlog.svg",
+      "has-icon": true
+    },
+    {
+      "key": "for-you",
+      "name": "For you",
+      "initial": "F",
+      "count": 7,
+      "glyph": "",
+      "icon": "icons/for-you.svg",
+      "has-icon": true
+    },
+    {
+      "header": true,
+      "key": "section:platforms",
+      "name": "PLATFORMS",
+      "initial": "P",
+      "count": 0,
+      "expanded": true,
+      "can-add": false
+    },
+    {
+      "key": "p:23",
+      "name": "Dreamcast",
+      "initial": "D",
+      "count": 1,
+      "glyph": ""
+    },
+    {
+      "key": "p:3",
+      "name": "Game Boy",
+      "initial": "G",
+      "count": 2,
+      "glyph": ""
+    },
+    {
+      "key": "p:4",
+      "name": "Game Boy Color",
+      "initial": "G",
+      "count": 2,
+      "glyph": ""
+    },
+    {
+      "key": "p:7",
+      "name": "Nintendo 64",
+      "initial": "N",
+      "count": 2,
+      "glyph": ""
+    },
+    {
+      "key": "p:12",
+      "name": "PlayStation",
+      "initial": "P",
+      "count": 2,
+      "glyph": ""
+    },
+    {
+      "key": "p:13",
+      "name": "PlayStation 2",
+      "initial": "P",
+      "count": 3,
+      "glyph": ""
+    },
+    {
+      "key": "p:9",
+      "name": "Sega Mega Drive/Genesis",
+      "initial": "S",
+      "count": 3,
+      "glyph": ""
+    },
+    {
+      "key": "p:15",
+      "name": "Super Nintendo Entertainment System",
+      "initial": "S",
+      "count": 3,
+      "glyph": ""
+    },
+    {
+      "header": true,
+      "key": "section:collections",
+      "name": "COLLECTIONS",
+      "initial": "C",
+      "count": 0,
+      "expanded": true,
+      "can-add": true
+    },
+    {
+      "key": "c:12",
+      "name": "Couch co-op",
+      "initial": "C",
+      "count": 5,
+      "glyph": "",
+      "editable": true
+    },
+    {
+      "key": "c:14",
+      "name": "Short sessions",
+      "initial": "S",
+      "count": 7,
+      "glyph": "",
+      "editable": true
+    },
+    {
+      "key": "c:9",
+      "name": "Retro night · sam",
+      "initial": "R",
+      "count": 9,
+      "glyph": ""
+    }
+  ],
+  "rows": [
+    {
+      "cards": [
+        {
+          "id": 114,
+          "title": "Tin Comet",
+          "platform": "PlayStation 2",
+          "cover": "fixtures/images/cover-1.png",
+          "has-cover": true,
+          "downloaded": true,
+          "focused": false,
+          "favorite": true,
+          "versions": 1,
+          "aspect": 0.71
+        },
+        {
+          "id": 87,
+          "title": "Lantern Drift",
+          "platform": "PlayStation 2",
+          "cover": "fixtures/images/cover-2.png",
+          "has-cover": true,
+          "downloaded": false,
+          "focused": false,
+          "favorite": true,
+          "versions": 1,
+          "aspect": 0.71
+        },
+        {
+          "id": 203,
+          "title": "Moss Knight",
+          "platform": "Sega Mega Drive/Genesis",
+          "cover": "fixtures/images/cover-3.png",
+          "has-cover": true,
+          "downloaded": true,
+          "focused": false,
+          "favorite": false,
+          "versions": 1,
+          "aspect": 0.71
+        },
+        {
+          "id": 56,
+          "title": "Harbor Run",
+          "platform": "PlayStation 2",
+          "cover": "fixtures/images/cover-4.png",
+          "has-cover": true,
+          "downloaded": false,
+          "focused": false,
+          "favorite": false,
+          "versions": 2,
+          "aspect": 0.71
+        },
+        {
+          "id": 241,
+          "title": "Ember Lighthouse",
+          "platform": "Sega Mega Drive/Genesis",
+          "has-cover": false,
+          "downloaded": false,
+          "focused": false,
+          "favorite": false,
+          "versions": 1,
+          "aspect": 0.71
+        }
+      ],
+      "shelf": 230
+    },
+    {
+      "cards": [
+        {
+          "id": 19,
+          "title": "Pixel Orchard",
+          "platform": "Game Boy",
+          "cover": "fixtures/images/cover-5.png",
+          "has-cover": true,
+          "downloaded": true,
+          "focused": false,
+          "favorite": false,
+          "versions": 1,
+          "aspect": 1.0
+        },
+        {
+          "id": 142,
+          "title": "Sky Ferry",
+          "platform": "Game Boy Color",
+          "cover": "fixtures/images/cover-6.png",
+          "has-cover": true,
+          "downloaded": false,
+          "focused": false,
+          "favorite": true,
+          "versions": 1,
+          "aspect": 1.0
+        },
+        {
+          "id": 77,
+          "title": "Glass Canyon",
+          "platform": "Super Nintendo Entertainment System",
+          "cover": "fixtures/images/cover-7.png",
+          "has-cover": true,
+          "downloaded": true,
+          "focused": false,
+          "favorite": false,
+          "versions": 1,
+          "aspect": 1.38
+        },
+        {
+          "id": 165,
+          "title": "Rook & Ribbon",
+          "platform": "Super Nintendo Entertainment System",
+          "cover": "fixtures/images/cover-8.png",
+          "has-cover": true,
+          "downloaded": false,
+          "focused": false,
+          "favorite": false,
+          "versions": 1,
+          "aspect": 1.38
+        },
+        {
+          "id": 230,
+          "title": "Copper Valley",
+          "platform": "Game Boy Color",
+          "has-cover": true,
+          "downloaded": false,
+          "focused": false,
+          "favorite": false,
+          "versions": 1,
+          "aspect": 1.0,
+          "cover": "fixtures/images/cover-9.png"
+        }
+      ],
+      "shelf": 172
+    },
+    {
+      "cards": [
+        {
+          "id": 98,
+          "title": "Velvet Circuit",
+          "platform": "Super Nintendo Entertainment System",
+          "has-cover": true,
+          "downloaded": false,
+          "focused": false,
+          "favorite": false,
+          "versions": 1,
+          "aspect": 1.38,
+          "cover": "fixtures/images/cover-10.png"
+        },
+        {
+          "id": 131,
+          "title": "Wavebreaker",
+          "platform": "Nintendo 64",
+          "has-cover": true,
+          "downloaded": false,
+          "focused": false,
+          "favorite": false,
+          "versions": 1,
+          "aspect": 1.37,
+          "cover": "fixtures/images/cover-11.png"
+        },
+        {
+          "id": 44,
+          "title": "Tundra Post",
+          "platform": "PlayStation",
+          "has-cover": true,
+          "downloaded": false,
+          "focused": false,
+          "favorite": false,
+          "versions": 1,
+          "aspect": 1.16,
+          "cover": "fixtures/images/cover-12.png"
+        },
+        {
+          "id": 187,
+          "title": "Signal Bloom",
+          "platform": "Nintendo 64",
+          "has-cover": true,
+          "downloaded": false,
+          "focused": false,
+          "favorite": false,
+          "versions": 1,
+          "aspect": 1.37,
+          "cover": "fixtures/images/cover-13.png"
+        },
+        {
+          "id": 62,
+          "title": "Quiet Harbor",
+          "platform": "PlayStation",
+          "has-cover": true,
+          "downloaded": false,
+          "focused": false,
+          "favorite": false,
+          "versions": 1,
+          "aspect": 1.16,
+          "cover": "fixtures/images/cover-14.png"
+        }
+      ],
+      "shelf": 148
+    },
+    {
+      "cards": [
+        {
+          "id": 219,
+          "title": "Zephyr Rally",
+          "platform": "Sega Mega Drive/Genesis",
+          "has-cover": true,
+          "downloaded": false,
+          "focused": false,
+          "favorite": false,
+          "versions": 1,
+          "aspect": 0.71,
+          "cover": "fixtures/images/cover-15.png"
+        },
+        {
+          "id": 33,
+          "title": "Orbit Bakery",
+          "platform": "Dreamcast",
+          "has-cover": true,
+          "downloaded": false,
+          "focused": false,
+          "favorite": false,
+          "versions": 1,
+          "aspect": 1.0,
+          "cover": "fixtures/images/cover-16.png"
+        },
+        {
+          "id": 152,
+          "title": "Lumen Tide",
+          "platform": "Game Boy",
+          "has-cover": true,
+          "downloaded": false,
+          "focused": false,
+          "favorite": false,
+          "versions": 1,
+          "aspect": 1.0,
+          "cover": "fixtures/images/cover-17.png"
+        }
+      ],
+      "shelf": 230
+    }
+  ]
+}

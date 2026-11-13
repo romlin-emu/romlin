@@ -1,0 +1,25 @@
+{
+  "screen": 2,
+  "fullscreen-mode": true,
+  "fullscreen-layout": "list-detail",
+  "fullscreen-view": 0,
+  "fullscreen-heading": "Systems",
+  "fullscreen-system": 2,
+  "fullscreen-systems": [
+    { "key": "p:3", "name": "Nintendo Entertainment System", "has-icon": false, "games": 41, "on-device": 6, "tint": "#32497b", "recent": [], "more": 0, "last-played": "" },
+    { "key": "p:7", "name": "Super Nintendo Entertainment System", "has-icon": false, "games": 58, "on-device": 9, "tint": "#767b32", "recent": [], "more": 0, "last-played": "" },
+    { "key": "p:4", "name": "Game Boy", "has-icon": false, "games": 24, "on-device": 3, "tint": "#41327b", "recent": ["fixtures/images/cover-5.png", "fixtures/images/cover-6.png"], "more": 22, "last-played": "Pixel Orchard · 2 hours ago" },
+    { "key": "p:5", "name": "Game Boy Advance", "has-icon": false, "games": 37, "on-device": 0, "tint": "#327b4e", "recent": [], "more": 0, "last-played": "" },
+    { "key": "p:9", "name": "Sega Genesis", "has-icon": false, "games": 19, "on-device": 2, "tint": "#7b3244", "recent": [], "more": 0, "last-played": "" }
+  ],
+  "fullscreen-hints-start": [
+    { "keys": [{ "text": "L1", "shape": "" }, { "text": "R1", "shape": "" }], "action": "System" },
+    { "keys": [{ "text": "Options", "shape": "" }], "action": "Menu" }
+  ],
+  "fullscreen-hints-end": [
+    { "keys": [{ "text": "", "shape": "triangle" }], "action": "Search" },
+    { "keys": [{ "text": "", "shape": "square" }], "action": "Random game" },
+    { "keys": [{ "text": "", "shape": "circle" }], "action": "Exit" },
+    { "keys": [{ "text": "", "shape": "cross" }], "action": "Open" }
+  ]
+}

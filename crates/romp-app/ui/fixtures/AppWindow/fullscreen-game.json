@@ -1,0 +1,103 @@
+{
+  "screen": 3,
+  "fullscreen-mode": true,
+  "fullscreen-full-page": false,
+  "fullscreen-layout": "list-detail",
+  "fullscreen-view": 1,
+  "fullscreen-heading": "Super Nintendo Entertainment System",
+  "game-title": "Glass Canyon",
+  "game-platform": "Super Nintendo Entertainment System",
+  "game-genre": "PLATFORM",
+  "game-credit": "Quartzlight Games · Northgate Interactive · 1994",
+  "game-players": "1–2 players",
+  "game-rating": 4.5,
+  "game-score": "88 / 100",
+  "game-summary": "A courier races through a canyon of living glass, bending light to open new paths before the sun sets on the valley. Eight worlds, hidden prisms in every stage and a two-player relay mode that passes the lantern back and forth.",
+  "game-cover": "fixtures/images/cover-7.png",
+  "has-game-cover": true,
+  "game-cover-aspect": 1.38,
+  "game-downloaded": true,
+  "game-playable": true,
+  "game-can-download": true,
+  "game-favorite": false,
+  "game-save-states": 2,
+  "game-size": "2.1 MB",
+  "game-resume": "Slot 2",
+  "game-core": "Snes9x",
+  "game-shots": [
+    {
+      "image": "fixtures/images/shot-1.png",
+      "loaded": true
+    },
+    {
+      "image": "fixtures/images/shot-2.png",
+      "loaded": true
+    },
+    {
+      "image": "fixtures/images/shot-3.png",
+      "loaded": true
+    }
+  ],
+  "fullscreen-hints-start": [
+    {
+      "keys": [
+        {
+          "text": "PgUp",
+          "shape": ""
+        },
+        {
+          "text": "PgDn",
+          "shape": ""
+        }
+      ],
+      "action": "Previous / next game"
+    },
+    {
+      "keys": [
+        {
+          "text": "M",
+          "shape": ""
+        }
+      ],
+      "action": "Game menu"
+    }
+  ],
+  "fullscreen-hints-end": [
+    {
+      "keys": [
+        {
+          "text": "F",
+          "shape": ""
+        }
+      ],
+      "action": "Favorite"
+    },
+    {
+      "keys": [
+        {
+          "text": "D",
+          "shape": ""
+        }
+      ],
+      "action": "Download"
+    },
+    {
+      "keys": [
+        {
+          "text": "Esc",
+          "shape": ""
+        }
+      ],
+      "action": "Back"
+    },
+    {
+      "keys": [
+        {
+          "text": "Enter",
+          "shape": ""
+        }
+      ],
+      "action": "Play"
+    }
+  ]
+}
