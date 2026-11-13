@@ -375,23 +375,6 @@ mod process {
     }
 }
 
-#[cfg(not(any(unix, windows)))]
-mod process {
-    use std::process::Child;
-
-    pub fn freeze(_child: &Child, _on: bool) -> std::io::Result<()> {
-        Err(std::io::ErrorKind::Unsupported.into())
-    }
-
-    pub fn ask_to_exit(_child: &Child) -> std::io::Result<()> {
-        Ok(())
-    }
-
-    pub fn kill(child: &mut Child) -> std::io::Result<()> {
-        child.kill()
-    }
-}
-
 /// Starts the emulator and calls `on_exit` with its exit code and the last lines it printed.
 pub fn launch(
     mut command: std::process::Command,

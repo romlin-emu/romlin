@@ -529,7 +529,7 @@ impl Gamepads {
     }
 
     /// Gamepads that never see a controller, for tests that need no SDL.
-    #[cfg(test)]
+    #[cfg(all(test, target_os = "linux"))]
     pub fn without_controllers() -> Self {
         Self {
             pads: Vec::new(),
