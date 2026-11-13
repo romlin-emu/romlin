@@ -16,6 +16,7 @@ mod dock;
 mod download;
 mod eden;
 mod external;
+mod external_menu;
 mod fetch;
 mod fullscreen;
 mod gamepads;

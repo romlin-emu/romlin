@@ -39,7 +39,7 @@ fn sdl_virtual_controller_reaches_game_input() -> anyhow::Result<()> {
 
     let _serial = SDL_TEST_LOCK.lock().unwrap();
     // This test owns SDL, which is process-wide, so it does the polling thread's work itself.
-    let mut sdl = Sdl::new().context("SDL initialization failed")?;
+    let mut sdl = Sdl::new(false).context("SDL initialization failed")?;
     let mut pads = Gamepads {
         pads: Vec::new(),
         buzz: None,

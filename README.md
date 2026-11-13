@@ -201,6 +201,7 @@ In-game saves and save states sync with RomM before and after you play, so you c
 - Gamepads are picked up automatically: the first one joins the keyboard as player 1, and each new one becomes the next player.
 - Change players or remap any key or button in **Settings → Players**.
 - The Guide button, or Select and Start together, opens the game menu.
+- In Eden and RPCS3 games in Gaming Mode and on Windows, Select and Start together pause the game and open Romlin's menu over it, with Resume and Quit game. The Guide button stays with the emulator. Elsewhere, and in xemu, the emulator keeps its own controls.
 - In Amiga, DOS, C64 and ZX Spectrum games the keyboard types into the game and F12 opens the menu. Click in the game to use your mouse; F12 releases it.
 - Accessories such as the SNES Mouse, Super Scope, Zapper or GunCon are chosen per port in the game menu. A light gun aims where you point and fires with the left button; the right button reloads.
 
@@ -265,7 +266,10 @@ shadows. Connect controllers before launching and use a gamepad layout in Steam
 Input. Romlin replaces controller types, bindings and input profiles on every
 launch and disconnects unused slots. Missing controllers or mappings produce a
 notice. Romlin releases its controller handles while external emulators run and
-reopens them afterwards. Its fullscreen preference also follows Gaming Mode.
+reopens them afterwards; where it shows its game menu over Eden, it keeps reading
+controllers as the system reports them, without opening their devices. There
+Select+Start opens that menu, and elsewhere it closes Eden. Its fullscreen
+preference also follows Gaming Mode.
 macOS installation is not supported yet.
 
 Pokémon: Let's Go, Pikachu! and Eevee! require Handheld or a single Joy-Con rather

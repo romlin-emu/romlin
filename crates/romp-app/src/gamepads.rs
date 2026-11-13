@@ -274,10 +274,13 @@ struct Sdl {
 }
 
 impl Sdl {
-    fn new() -> Result<Self, sdl3::Error> {
+    /// Passive SDL reads controllers as the system reports them and opens no HID device, which
+    /// an external emulator then has to itself.
+    fn new(passive: bool) -> Result<Self, sdl3::Error> {
         crate::eden::input::configure_sdl();
         sdl3::hint::set("SDL_NO_SIGNAL_HANDLERS", "1");
         sdl3::hint::set("SDL_JOYSTICK_ALLOW_BACKGROUND_EVENTS", "1");
+        sdl3::hint::set("SDL_JOYSTICK_HIDAPI", if passive { "0" } else { "1" });
         let context = sdl3::init()?;
         let subsystem = context.gamepad()?;
         let joysticks = context.joystick()?;
@@ -451,11 +454,12 @@ impl Sdl {
 struct Poller {
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
+    passive: bool,
 }
 
 impl Poller {
     /// Returns once SDL has started, or `None` when it could not.
-    fn start(shared: Arc<Mutex<Shared>>) -> Option<Self> {
+    fn start(shared: Arc<Mutex<Shared>>, passive: bool) -> Option<Self> {
         let stop = Arc::new(AtomicBool::new(false));
         let (ready_tx, ready_rx) = std::sync::mpsc::channel();
         let thread = {
@@ -463,7 +467,7 @@ impl Poller {
             std::thread::Builder::new()
                 .name("gamepads".into())
                 .spawn(move || {
-                    let mut sdl = match Sdl::new() {
+                    let mut sdl = match Sdl::new(passive) {
                         Ok(sdl) => sdl,
                         Err(e) => {
                             tracing::warn!("gamepads unavailable: {e}");
@@ -487,6 +491,7 @@ impl Poller {
         let poller = Self {
             stop,
             thread: Some(thread),
+            passive,
         };
         ready_rx.recv().ok().map(|()| poller)
     }
@@ -516,8 +521,21 @@ impl Gamepads {
         Self {
             pads: Vec::new(),
             buzz: None,
-            poller: Poller::start(shared.clone()),
+            poller: Poller::start(shared.clone(), false),
             shared,
+            active: HashMap::new(),
+            presses: Vec::new(),
+        }
+    }
+
+    /// Gamepads that never see a controller, for tests that need no SDL.
+    #[cfg(all(test, target_os = "linux"))]
+    pub fn without_controllers() -> Self {
+        Self {
+            pads: Vec::new(),
+            buzz: None,
+            shared: Arc::default(),
+            poller: None,
             active: HashMap::new(),
             presses: Vec::new(),
         }
@@ -584,6 +602,7 @@ impl Gamepads {
         self.buzz
     }
 
+    /// Lets go of every controller while an external emulator runs.
     pub fn suspend(&mut self) {
         self.poller.take();
         *self.shared.lock().unwrap() = Shared::default();
@@ -592,9 +611,18 @@ impl Gamepads {
         self.presses.clear();
     }
 
+    /// Keeps reading controllers while an external emulator runs, without holding their HID
+    /// devices; see `Sdl::new`. Nothing rumbles meanwhile.
+    pub fn listen_passively(&mut self) {
+        self.suspend();
+        self.poller = Poller::start(self.shared.clone(), true);
+    }
+
+    /// Takes the controllers back after `suspend` or `listen_passively`.
     pub fn resume(&mut self) {
-        if self.poller.is_none() {
-            self.poller = Poller::start(self.shared.clone());
+        if self.poller.as_ref().is_none_or(|poller| poller.passive) {
+            self.poller.take();
+            self.poller = Poller::start(self.shared.clone(), false);
         }
     }
 
@@ -744,6 +772,27 @@ mod tests {
         for (hint, expected, _) in hints {
             assert_eq!(sdl3::hint::get(hint).as_deref(), Some(expected), "{hint}");
         }
+    }
+
+    #[test]
+    fn passive_listening_leaves_hid_devices_until_gamepads_resume() {
+        let _serial = SDL_TEST_LOCK.lock().unwrap();
+        let hidapi = || sdl3::hint::get("SDL_JOYSTICK_HIDAPI");
+        let mut pads = Gamepads::new();
+        assert!(
+            pads.poller.is_some(),
+            "SDL must initialize for the lifecycle test"
+        );
+        assert_eq!(hidapi().as_deref(), Some("1"));
+        pads.listen_passively();
+        assert!(pads.poller.as_ref().is_some_and(|p| p.passive));
+        assert_eq!(hidapi().as_deref(), Some("0"));
+        pads.resume();
+        assert!(pads.poller.as_ref().is_some_and(|p| !p.passive));
+        assert_eq!(hidapi().as_deref(), Some("1"));
+        pads.suspend();
+        pads.resume();
+        assert_eq!(hidapi().as_deref(), Some("1"));
     }
 
     #[test]
