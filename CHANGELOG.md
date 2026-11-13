@@ -2,6 +2,60 @@
 
 Romlin continues the upstream RomP release history below. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Romlin uses [semantic versioning](https://semver.org/).
 
+## [0.20.0](https://github.com/romlin-emu/romlin/compare/v0.19.1...v0.20.0) (2026-11-13)
+
+
+### Features
+
+* add F11 fullscreen mode with a selectable game list layout ([d2fe95f](https://github.com/romlin-emu/romlin/commit/d2fe95fb281d140d800f5630666a8ccde525d7ae))
+* add textures support for ps2 ([6313775](https://github.com/romlin-emu/romlin/commit/631377505c1b788bec82ada19cf042cc2f8607fb))
+* build out full screen mode into a console-first browsing flow ([6a50dac](https://github.com/romlin-emu/romlin/commit/6a50dacec48c72efebba29646eb2348d07f1a2e8))
+* choose the file a multi-file game starts with, keeping each file's saves apart ([b4b0b38](https://github.com/romlin-emu/romlin/commit/b4b0b38712a915a69b8845218291bbbbdda43c6e))
+* configure PS2 Buzz! and SingStar accessories automatically ([1f41ce3](https://github.com/romlin-emu/romlin/commit/1f41ce3abbfc8e301ecfde5c6e5adac58ea96e19))
+* **eden:** configure connected gamepads on launch ([594e0e6](https://github.com/romlin-emu/romlin/commit/594e0e6abee22c3b2742f351dce3b0018d843b3e))
+* group a game's versions as RomM does, with a version picker on its page ([ec66fa9](https://github.com/romlin-emu/romlin/commit/ec66fa9a1f1cac0cfcd6f52a08dc887382443187))
+* mark the files already downloaded in a game's file menu ([b20a1f0](https://github.com/romlin-emu/romlin/commit/b20a1f000aafe368b62617a95966f84700e5aa4a))
+* offer a disc game's translations and hacks beside it ([616f8a9](https://github.com/romlin-emu/romlin/commit/616f8a9bd47a46c9e8e57c05ca4d83e9053cc51b))
+* open a random game with Surprise me ([8fd5ce3](https://github.com/romlin-emu/romlin/commit/8fd5ce3841e4ce5b51f146a09d21612d74b84b12))
+* resize and collapse the sidebar by dragging its edge ([0a6151b](https://github.com/romlin-emu/romlin/commit/0a6151bc3b83c84c5b15c590b051b14cb43bc8d0))
+* rumble each player's controllers when the game does ([cac1ee4](https://github.com/romlin-emu/romlin/commit/cac1ee400f356e71725d1ed1b568de6d8ead14ef))
+* show what's new in a version the first time it runs ([28df830](https://github.com/romlin-emu/romlin/commit/28df8300e23d3b6643426af7be32e97dc6607c25))
+* **steamos:** add one-click RomP installer ([b282332](https://github.com/romlin-emu/romlin/commit/b282332463e3336ef87f6c2b626409400a25574c))
+* sync and set RomM play statuses, with Now playing and Backlog lists ([c31b6ba](https://github.com/romlin-emu/romlin/commit/c31b6ba728b71e7811c8e38bab4631645231eee7))
+
+
+### Bug Fixes
+
+* accept versioned Switch firmware and explain missing downloads ([751393b](https://github.com/romlin-emu/romlin/commit/751393b2a0e862186aec6023789c9cdbaa1f374b))
+* allow controller cycling through all six settings tabs ([f9280f8](https://github.com/romlin-emu/romlin/commit/f9280f858e7d9248e47d081921829ea5dc0fa4a0))
+* **bios:** continue firmware recovery past stale downloads ([5aac3b1](https://github.com/romlin-emu/romlin/commit/5aac3b1d752ccd79ad7d81fd1114414e0fc4d5d6))
+* **eden:** ask to close Eden on Select+Start ([f8aa060](https://github.com/romlin-emu/romlin/commit/f8aa060277f12bac379c13d57587ab4e7e67a186))
+* **eden:** ask to close Eden on Select+Start ([1161a71](https://github.com/romlin-emu/romlin/commit/1161a71d685875e3718ec28e096184c9044c31ea))
+* **eden:** log controller setup on launch ([54f5e38](https://github.com/romlin-emu/romlin/commit/54f5e38384bea286a032c6789320daedbb7449c0))
+* **eden:** make controllers work on SteamOS and keep Eden data across updates ([ee2ee40](https://github.com/romlin-emu/romlin/commit/ee2ee40a2e59e34706b9ff990a15099ecf2e2f5b))
+* **gaming-mode:** prepare credentials and normalize UI behavior ([1451821](https://github.com/romlin-emu/romlin/commit/1451821bb24ed5bca62c08c6f01cb02b9735ffb1))
+* keep both sign-ins in one keychain item so macOS asks for the password once ([05099f1](https://github.com/romlin-emu/romlin/commit/05099f1158d5387d2607fdb66d5204ccab880c81))
+* make controller focus visible and keep settings in view ([6af741a](https://github.com/romlin-emu/romlin/commit/6af741a9ed9c0cecf905f64bea6dd4228f1ebf03))
+* **perf:** measure active playback and account for frame loop stalls ([d6b9b56](https://github.com/romlin-emu/romlin/commit/d6b9b560829b723575225a044a2f948c044cf56a))
+* **play:** wait for core exit before closing game ([96c50b7](https://github.com/romlin-emu/romlin/commit/96c50b7a5e27aba9f5646a906e599790c01e3053))
+* poll controllers on their own thread so connecting one in a game no longer crashes macOS ([43b4c14](https://github.com/romlin-emu/romlin/commit/43b4c140200c8f771f4968a0aca7f09195ef74e0))
+* preserve core options and import Eden firmware ([a36352a](https://github.com/romlin-emu/romlin/commit/a36352ae0389fbd44d9385aeaa17256e06c5c1d3))
+* ps2 games running on PAL having timing issues ([0cb763c](https://github.com/romlin-emu/romlin/commit/0cb763cf868d5df4bba8f5f7f23eb6c1190e8280))
+* **ps2:** start games with the newest retail BIOS, not the first listed ([cfd0a1d](https://github.com/romlin-emu/romlin/commit/cfd0a1d478ec7a46eee7d1ba0e7a3c71521123a9))
+* read the settings emulators list with translations ([15bf758](https://github.com/romlin-emu/romlin/commit/15bf75831c368ed419a48c23ab21287f6d1802e3))
+* resolve Windows lint and serialize SDL controller tests ([#7](https://github.com/romlin-emu/romlin/issues/7)) ([3e9b9f5](https://github.com/romlin-emu/romlin/commit/3e9b9f5efe050d125b199d23d181350c8dd93b6e))
+* **romp-app:** log startup failures ([3077241](https://github.com/romlin-emu/romlin/commit/30772417f63738b98398a543f68ff99c0eb66319))
+* **setup:** enable scrolling on short displays ([da91a46](https://github.com/romlin-emu/romlin/commit/da91a46c6d2ccaecca59f39ed32fe46e9fbd86f3))
+* **shaders:** compile for advertised GLSL capabilities ([2823234](https://github.com/romlin-emu/romlin/commit/28232348b8e356f807eeffb674269c0b9114a85d))
+* show Download for a picked file that isn't downloaded yet ([16ba512](https://github.com/romlin-emu/romlin/commit/16ba51289edb339c79b46696b13427896199ea7f))
+* show GameCube and Wii games on Windows, where Vulkan cores get no surface ([7b947ad](https://github.com/romlin-emu/romlin/commit/7b947ad1600d343b483b8ea7a082af58f14f0ddc))
+* **steamos:** detect Gamescope despite overridden desktop labels ([33a8f05](https://github.com/romlin-emu/romlin/commit/33a8f0594043baed5e4d4beb05ce8ebe2f3af2dc))
+* **steamos:** install the nightly AppImage ([426a6c7](https://github.com/romlin-emu/romlin/commit/426a6c7e8894d0d5cb7689884d3c453c289eef0a))
+* **ui:** navigate and reveal game page controls with a controller ([0439532](https://github.com/romlin-emu/romlin/commit/0439532e737f4fddac3de2456ba13a39a067b2b6))
+* **vulkan:** prefer cached readback memory on integrated GPUs ([4fdf052](https://github.com/romlin-emu/romlin/commit/4fdf05262f977e87b3b1a791f0fc0a2607e1b45e))
+* **vulkan:** prefer capable hardware GPUs with core fallback ([2eff14a](https://github.com/romlin-emu/romlin/commit/2eff14a1b3933e067b150dad387bcb724bd856d4))
+* **vulkan:** retain system memory preference within readback tiers ([52f268f](https://github.com/romlin-emu/romlin/commit/52f268f144ffbfd05f9094bea6e9bd6c9de0d514))
+
 ## [0.19.1](https://github.com/romlin-emu/romlin/compare/v0.19.0...v0.19.1) (2026-11-04)
 
 
