@@ -1,0 +1,6 @@
+{
+  "screen": 0,
+  "first-run": true,
+  "server-url": "romm.home.arpa",
+  "connect-error": "Could not reach the server. Check the address and that RomM is running."
+}

@@ -30,6 +30,10 @@ APPIMAGE_RUNTIME_VERSION = "20251108"
 APPIMAGE_RUNTIME_SHA256 = "2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d"
 NFPM_VERSION = "2.47.0"
 NFPM_SHA256 = "0660ca602b2d2d2ae4781a06c692b3eeb9d437ffea05b831d76e41f4a3188783"
+# Must equal the slint version in Cargo.lock: the viewer interprets the same .slint files.
+SLINT_VIEWER = "1.18.1"
+SLINT_VIEWER_LINUX_SHA256 = "86b260e661cdc24dcadaf63266b034f3281cbec542afc26545a72a986fe42a13"
+SLINT_VIEWER_MACOS_SHA256 = "e6ced86250e052122b65b593c77c2042a54798428a0f9ae5840f8769f1488571"
 # winit loads these when it starts on X11 and panics without them, and minimal installs
 # don't have libxkbcommon-x11, so the AppImage brings them. None is on AppImage's excludelist.
 LINUX_LIBDIR = "/usr/lib/x86_64-linux-gnu"
@@ -161,6 +165,79 @@ tar -xzOf "$nfpm.tar.gz" nfpm > "$nfpm.tmp"
 rm "$nfpm.tar.gz"
 chmod +x "$nfpm.tmp"
 mv "$nfpm.tmp" "$nfpm"
+'''
+
+# ui-shots runs this; it isn't in [tools], so CI and release builds never fetch it.
+[tasks.slint-viewer]
+description = "Download the pinned slint-viewer"
+hide = true
+quiet = true
+shell = "bash -c"
+run = '''
+set -eu
+locked=$(grep -A 1 '^name = "slint"$' Cargo.lock | sed -n 's/^version = "\(.*\)"/\1/p')
+if [ "$locked" != "$SLINT_VIEWER" ]; then
+  echo "SLINT_VIEWER is $SLINT_VIEWER but Cargo.lock has slint $locked; change them together" >&2
+  exit 1
+fi
+dir=dist/tools/slint-viewer-$SLINT_VIEWER
+[ -f "$dir/slint-viewer" ] && exit 0
+case "$(uname -s)/$(uname -m)" in
+  Linux/x86_64) asset=linux sum=$SLINT_VIEWER_LINUX_SHA256 check="sha256sum -c -" ;;
+  Darwin/*) asset=macos sum=$SLINT_VIEWER_MACOS_SHA256 check="shasum -a 256 -c -" ;;
+  *) echo "slint-viewer: no pinned build for $(uname -s) $(uname -m)" >&2; exit 1 ;;
+esac
+mkdir -p dist/tools
+rm -rf "$dir.tmp" "$dir.tar.gz"
+curl -fsSL -o "$dir.tar.gz" "https://github.com/slint-ui/slint/releases/download/v$SLINT_VIEWER/slint-viewer-$asset.tar.gz"
+echo "$sum  $dir.tar.gz" | $check
+mkdir "$dir.tmp"
+tar -xzf "$dir.tar.gz" -C "$dir.tmp" --strip-components 1
+rm "$dir.tar.gz"
+mv "$dir.tmp" "$dir"
+'''
+
+# Fixtures are crates/romp-app/ui/fixtures/<Component>/<name>.json, read by slint-viewer --load-data.
+[tasks.ui-shots]
+description = "Render the UI fixtures to PNG images without building the app"
+quiet = true
+depends = ["slint-viewer"]
+shell = "bash -c"
+usage = 'arg "[fixture]" help="Fixture name without .json (default: every fixture)"'
+run = '''
+set -u
+viewer=$PWD/dist/tools/slint-viewer-$SLINT_VIEWER/slint-viewer
+out=$PWD/dist/ui-shots
+size=${SIZE:-1280x800}
+name=${usage_fixture:-}
+cd crates/romp-app/ui
+shopt -s nullglob
+if [ -n "$name" ]; then fixtures=(fixtures/*/"$name".json); else fixtures=(fixtures/*/*.json); fi
+if [ -z "${fixtures[0]-}" ]; then
+  echo "no fixture named '$name' in crates/romp-app/ui/fixtures" >&2
+  exit 1
+fi
+failed=0
+for fixture in "${fixtures[@]}"; do
+  component=${fixture#fixtures/}
+  component=${component%%/*}
+  png=$out/$component/$(basename "$fixture" .json).png
+  mkdir -p "$out/$component"
+  rm -f "$png"
+  # The viewer exits 0 when a fixture names a missing property or a value doesn't convert.
+  status=0
+  log=$(env -u SLINT_BACKEND "$viewer" --style fluent-dark --component "$component" \
+    --load-data "$fixture" --size "$size" --screenshot "$png" main.slint 2>&1 >/dev/null) || status=$?
+  [ -n "$log" ] && printf '%s\n' "$log" >&2
+  if [ "$status" -ne 0 ] || [ ! -f "$png" ] \
+    || grep -qE '^Warning: (ignoring unknown property|cannot set property)' <<<"$log"; then
+    echo "failed: $fixture" >&2
+    failed=1
+  else
+    echo "$png"
+  fi
+done
+exit "$failed"
 '''
 
 [tasks.app]

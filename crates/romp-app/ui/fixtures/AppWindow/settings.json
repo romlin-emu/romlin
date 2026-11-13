@@ -1,0 +1,93 @@
+{
+  "screen": 4,
+  "settings-section": 0,
+  "user-label": "mira",
+  "user-initial": "M",
+  "user-avatar": "fixtures/images/avatar.png",
+  "has-user-avatar": true,
+  "server-label": "romm.home.lan",
+  "heading": "All games",
+  "heading-detail": "412 games",
+  "selected-key": "all",
+  "settings-server": "https://romm.home.lan",
+  "pref-pause-unfocused": true,
+  "pref-resume": true,
+  "pref-fullscreen": false,
+  "pref-check-updates": true,
+  "pref-accept-installs": true,
+  "pref-volume": 80,
+  "pref-ui-scale": 0,
+  "pref-nintendo-labels": false,
+  "pref-stick-dpad": true,
+  "pref-popup-levels": ["All", "Quiet", "Off"],
+  "pref-popup-corners": ["Top right", "Top left", "Bottom right", "Bottom left"],
+  "pref-achievement-popups": 1,
+  "pref-achievement-corner": 0,
+  "ra-signed-in": true,
+  "ra-user": "mira_plays",
+  "ra-hardcore-allowed": true,
+  "ra-hardcore": false,
+  "sidebar": [
+    {"header": false, "key": "all", "name": "All games", "initial": "A", "count": 412, "has-icon": false, "glyph": "", "expanded": false, "can-add": false, "editable": false, "note": false},
+    {"header": false, "key": "favorites", "name": "Favorites", "initial": "F", "count": 18, "has-icon": false, "glyph": "♥", "expanded": false, "can-add": false, "editable": false, "note": false},
+    {"header": false, "key": "recent", "name": "Recently played", "initial": "R", "count": 6, "icon": "icons/recent.svg", "has-icon": true, "glyph": "", "expanded": false, "can-add": false, "editable": false, "note": false},
+    {"header": false, "key": "now-playing", "name": "Now playing", "initial": "N", "count": 2, "icon": "icons/gamepad.svg", "has-icon": true, "glyph": "", "expanded": false, "can-add": false, "editable": false, "note": false},
+    {"header": true, "key": "section:platforms", "name": "PLATFORMS", "initial": "", "count": 0, "has-icon": false, "glyph": "", "expanded": true, "can-add": false, "editable": false, "note": false},
+    {"header": false, "key": "p:1", "name": "Game Boy Advance", "initial": "G", "count": 64, "has-icon": false, "glyph": "", "expanded": false, "can-add": false, "editable": false, "note": false},
+    {"header": false, "key": "p:2", "name": "Nintendo GameCube", "initial": "N", "count": 37, "has-icon": false, "glyph": "", "expanded": false, "can-add": false, "editable": false, "note": false},
+    {"header": false, "key": "p:3", "name": "Nintendo 64", "initial": "N", "count": 52, "has-icon": false, "glyph": "", "expanded": false, "can-add": false, "editable": false, "note": false},
+    {"header": false, "key": "p:4", "name": "PlayStation", "initial": "P", "count": 88, "has-icon": false, "glyph": "", "expanded": false, "can-add": false, "editable": false, "note": false},
+    {"header": false, "key": "p:5", "name": "PlayStation 2", "initial": "P", "count": 71, "has-icon": false, "glyph": "", "expanded": false, "can-add": false, "editable": false, "note": false},
+    {"header": false, "key": "p:6", "name": "Super Nintendo Entertainment System", "initial": "S", "count": 100, "has-icon": false, "glyph": "", "expanded": false, "can-add": false, "editable": false, "note": false}
+  ],
+  "settings-devices": [
+    {"key": "keyboard", "name": "Keyboard", "detail": "Built in", "player": 1, "active": false},
+    {"key": "pad:045e:0b13:0", "name": "Xbox Wireless Controller", "detail": "Controller", "player": 1, "active": true},
+    {"key": "pad:054c:0ce6:1", "name": "DualSense Wireless Controller", "detail": "Controller", "player": 2, "active": false}
+  ],
+  "settings-keys": [
+    {"keys": "Esc", "action": "Game menu"},
+    {"keys": "P", "action": "Pause"},
+    {"keys": "F5", "action": "Save state"},
+    {"keys": "F7", "action": "Load state"},
+    {"keys": "F6", "action": "Next save slot"},
+    {"keys": "F11", "action": "Full screen"},
+    {"keys": "F12", "action": "Screenshot"}
+  ],
+  "settings-storage-total": "48.9 GB",
+  "settings-storage": [
+    {"label": "Games", "size": "48.2 GB"},
+    {"label": "Saves and states", "size": "312.4 MB"},
+    {"label": "BIOS files", "size": "64.1 MB"},
+    {"label": "Emulators", "size": "186.9 MB"},
+    {"label": "Images", "size": "92.7 MB"}
+  ],
+  "settings-consoles": [
+    {
+      "name": "PlayStation 2",
+      "options": [
+        {"key": "armsx2_upscale", "label": "Resolution", "detail": "Higher is sharper and needs a faster computer.", "choices": ["Native", "2x", "3x", "4x"], "current": 2},
+        {"key": "armsx2_anisotropic_filtering", "label": "Anisotropic filtering", "detail": "Keeps textures sharp on floors and walls seen at an angle.", "choices": ["Off", "2x", "4x", "8x", "16x"], "current": 4},
+        {"key": "armsx2_widescreen_patches", "label": "Widescreen", "detail": "Shows a wider picture in games that have a widescreen patch.", "choices": ["Off", "On"], "current": 0}
+      ]
+    },
+    {
+      "name": "Nintendo 64",
+      "options": [
+        {"key": "mupen64plus-parallel-rdp-upscaling", "label": "Resolution", "detail": "Higher is sharper and needs a faster computer.", "choices": ["Native", "2x", "4x"], "current": 1}
+      ]
+    },
+    {
+      "name": "GameCube and Wii",
+      "options": [
+        {"key": "dolphin_efb_scale", "label": "Resolution", "detail": "Higher is sharper and needs a faster computer.", "choices": ["Native", "2x (720p)", "3x (1080p)"], "current": 1}
+      ]
+    },
+    {
+      "name": "PlayStation",
+      "options": [
+        {"key": "beetle_psx_hw_internal_resolution", "label": "Resolution", "detail": "Higher is sharper and needs a faster computer.", "choices": ["Native", "2x", "4x"], "current": 1}
+      ]
+    }
+  ]
+}
