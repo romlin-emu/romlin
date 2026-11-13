@@ -23,15 +23,16 @@ pub fn configure_sdl() {
     }
 }
 
-/// Refresh all controller slots on every launch.
-pub fn prepare(exe: &Path, controllers: &[SdlController]) -> io::Result<Prepared> {
+/// Refresh all controller slots on every launch. With Romlin's own `menu`, Select+Start opens
+/// it instead of closing Eden.
+pub fn prepare(exe: &Path, controllers: &[SdlController], menu: bool) -> io::Result<Prepared> {
     let config = super::user_dir(exe).join("config/qt-config.ini");
     let existing = match std::fs::read_to_string(&config) {
         Ok(text) => text,
         Err(e) if e.kind() == io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(e),
     };
-    let (text, prepared) = config_text(&existing, controllers);
+    let (text, prepared) = config_text(&existing, controllers, menu);
     crate::saves::replace_file(&config, text.as_bytes())?;
     Ok(prepared)
 }
@@ -275,7 +276,7 @@ fn player_settings(mapping: &str, device: &str) -> Settings {
     settings
 }
 
-fn config_text(existing: &str, observed: &[SdlController]) -> (String, Prepared) {
+fn config_text(existing: &str, observed: &[SdlController], menu: bool) -> (String, Prepared) {
     let (controllers, steam_virtual) = controllers(observed);
     let missing = controllers.is_empty() || controllers.iter().any(|c| c.mapping.is_none());
     let mut usable = controllers.iter().filter_map(|c| Some((c, c.mapping?)));
@@ -317,13 +318,14 @@ fn config_text(existing: &str, observed: &[SdlController]) -> (String, Prepared)
             ("use_docked_mode\\default".into(), "false".into()),
         ]),
     );
-    // Select+Start asks to close Eden, returning to Romlin; Stop and Restart contain that chord.
+    // Select+Start asks to close Eden, returning to Romlin, unless it opens Romlin's menu.
+    // Stop and Restart contain that chord.
     let mut ui = Settings::from([
         ("confirmStop".into(), "0".into()),
         ("confirmStop\\default".into(), "false".into()),
     ]);
     for (action, chord) in [
-        ("Exit%20Eden", "Plus+Minus"),
+        ("Exit%20Eden", if menu { "" } else { "Plus+Minus" }),
         ("Stop%20Emulation", ""),
         ("Restart%20Emulation", ""),
     ] {
@@ -438,7 +440,7 @@ mod tests {
             Shortcuts\\Main%20Window\\Stop%20Emulation\\Controller_KeySeq=L+Plus+Minus\n\
             Shortcuts\\Main%20Window\\Restart%20Emulation\\Controller_KeySeq=R+Plus+Minus\n\
             confirmStop=2\nconfirmStop\\default=true\n";
-        let (text, result) = config_text(original, &pads);
+        let (text, result) = config_text(original, &pads, false);
         assert!(!result.missing);
         assert!(result.steam_virtual);
         assert_eq!(setting(&text, "Renderer", "backend"), "1");
@@ -493,10 +495,22 @@ mod tests {
             assert_eq!(setting(&text, "UI", key), value);
             assert_eq!(setting(&text, "UI", &format!("{key}\\default")), "false");
         }
-        assert_eq!(config_text(&text, &pads).0, text);
+        assert_eq!(config_text(&text, &pads, false).0, text);
         for section in ["Controls", "System", "Renderer", "UI"] {
             assert_eq!(text.matches(&format!("[{section}]")).count(), 1);
         }
+        // With Romlin's menu, Select+Start opens it rather than closing Eden.
+        let exit = "Shortcuts\\Main%20Window\\Exit%20Eden\\Controller_KeySeq";
+        let (with_menu, _) = config_text(&text, &pads, true);
+        assert_eq!(setting(&with_menu, "UI", exit), "");
+        assert_eq!(
+            setting(&with_menu, "UI", &format!("{exit}\\default")),
+            "false"
+        );
+        assert_eq!(
+            setting(&config_text(&with_menu, &pads, false).0, "UI", exit),
+            "Plus+Minus"
+        );
     }
 
     #[test]
@@ -515,7 +529,7 @@ mod tests {
                 DUALSENSE_SDL3
             };
             let pads = [pad(hex, mapping)];
-            let (text, result) = config_text("", &pads);
+            let (text, result) = config_text("", &pads, false);
             assert!(!result.missing, "{hex}");
             let device = format!("engine:sdl,guid:{hex},port:0");
             for (key, button) in [
@@ -550,7 +564,7 @@ mod tests {
     #[test]
     fn bluetooth_hidapi_guids_use_sdl2s_usb_bus() {
         let pads = [pad("050000004c050000e60c000000016800", DUALSENSE_SDL3)];
-        let (text, result) = config_text("", &pads);
+        let (text, result) = config_text("", &pads, false);
         assert!(!result.missing);
         assert_eq!(
             control(&text, "player_0_button_a"),
@@ -576,6 +590,7 @@ mod tests {
             let (text, result) = config_text(
                 "[Controls]\nenable_procon_driver=true\n",
                 &[pad(hex, DUALSENSE_SDL3)],
+                false,
             );
             assert!(!result.missing);
             assert_eq!(control(&text, "enable_procon_driver"), "false");
@@ -590,12 +605,12 @@ mod tests {
     #[test]
     fn unknown_hidapi_and_missing_mappings_are_unusable() {
         let mut pads = [pad("03000000341200007856000000016800", DUALSENSE_SDL3)];
-        let (text, result) = config_text("", &pads);
+        let (text, result) = config_text("", &pads, false);
         assert!(result.missing);
         assert_eq!(control(&text, "player_0_connected"), "false");
         pads[0].mapping = None;
-        assert!(config_text("", &pads).1.missing);
-        assert!(config_text("", &[]).1.missing);
+        assert!(config_text("", &pads, false).1.missing);
+        assert!(config_text("", &[], false).1.missing);
     }
 
     #[test]
@@ -605,7 +620,7 @@ mod tests {
         let mut unmapped = supported.clone();
         unmapped.mapping = None;
         for (first, port) in [(unsupported, 0), (unmapped, 1)] {
-            let (text, result) = config_text("", &[first, supported.clone()]);
+            let (text, result) = config_text("", &[first, supported.clone()], false);
             assert!(result.missing);
             assert_eq!(control(&text, "player_0_connected"), "true");
             assert_eq!(
@@ -627,7 +642,7 @@ mod tests {
         pads[0].player_index = Some(0);
         pads[2].player_index = Some(1);
         pads[2].last_active = Some(Instant::now());
-        let (text, result) = config_text("", &pads);
+        let (text, result) = config_text("", &pads, false);
         assert!(!result.missing); // The shadowed Deck isn't an unusable extra player.
         assert!(result.steam_virtual);
         assert_eq!(
@@ -655,7 +670,7 @@ mod tests {
     #[test]
     fn eight_players_connect_and_handheld_stays_disconnected() {
         let pads = vec![pad("03000000de280000ff11000001000000", STEAM); 9];
-        let (text, result) = config_text("", &pads);
+        let (text, result) = config_text("", &pads, false);
         assert!(!result.missing);
         for player in 0..8 {
             assert_eq!(

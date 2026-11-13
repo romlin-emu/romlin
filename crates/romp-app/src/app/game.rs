@@ -6,6 +6,7 @@ use crate::cores::core_for_platform;
 use crate::details;
 use crate::download::DownloadError;
 use crate::eden;
+use crate::external_menu;
 use crate::fetch::download_files;
 use crate::paths;
 use crate::play::{self, CoreIdentity, GameOptions};
@@ -986,11 +987,12 @@ impl Controller {
                 with_controller(|c| c.external_closed(id, "xemu", code, log));
             });
         };
-        match self
-            .launch_external(|| xemu::launch(&exe, &config_path, &rom, prefs.fullscreen, on_exit))
-        {
+        // Guide and Back+Start open xemu's own menu, which Romlin's would cover.
+        match self.launch_external(false, &detail.title, || {
+            xemu::launch(&exe, &config_path, &rom, prefs.fullscreen, on_exit)
+        }) {
             Ok(running) => {
-                *self.running.borrow_mut() = Some(play::RunningGame::External(running));
+                *self.running.borrow_mut() = Some(running);
                 self.game_status(detail.id, String::new());
                 self.record_play(detail.id);
                 *self.playing.borrow_mut() = Some(detail);
@@ -1090,7 +1092,8 @@ impl Controller {
         gamepads.poll();
         let controllers = gamepads.sdl_controllers();
         drop(gamepads);
-        let input = match eden::input::prepare(&exe, &controllers) {
+        let menu = external_menu::supported(self.game_mode);
+        let input = match eden::input::prepare(&exe, &controllers, menu) {
             Ok(input) => input,
             Err(e) => {
                 self.external_notice(tr!(
@@ -1115,7 +1118,7 @@ impl Controller {
                 with_controller(|c| c.external_closed(id, "Eden", code, log));
             });
         };
-        match self.launch_external(|| {
+        match self.launch_external(menu, &detail.title, || {
             eden::launch(
                 &exe,
                 &rom,
@@ -1125,7 +1128,7 @@ impl Controller {
             )
         }) {
             Ok(running) => {
-                *self.running.borrow_mut() = Some(play::RunningGame::External(running));
+                *self.running.borrow_mut() = Some(running);
                 self.game_status(detail.id, String::new());
                 self.record_play(detail.id);
                 *self.playing.borrow_mut() = Some(detail);
@@ -1250,11 +1253,12 @@ impl Controller {
                 with_controller(|c| c.external_closed(id, "RPCS3", code, log));
             });
         };
-        match self.launch_external(|| {
+        let menu = external_menu::supported(self.game_mode);
+        match self.launch_external(menu, &detail.title, || {
             rpcs3::launch(&exe, &home, &config_path, &boot, prefs.fullscreen, on_exit)
         }) {
             Ok(running) => {
-                *self.running.borrow_mut() = Some(play::RunningGame::External(running));
+                *self.running.borrow_mut() = Some(running);
                 self.game_status(detail.id, String::new());
                 self.record_play(detail.id);
                 *self.playing.borrow_mut() = Some(detail);
@@ -1278,22 +1282,49 @@ impl Controller {
         }
     }
 
+    /// Starts an external emulator, with Romlin's game `menu` over it or with the controllers
+    /// left to it alone.
     fn launch_external(
         &self,
+        menu: bool,
+        title: &str,
         launch: impl FnOnce() -> std::io::Result<crate::external::Running>,
-    ) -> std::io::Result<crate::external::Running> {
-        self.gamepads.borrow_mut().suspend();
-        let result = launch();
-        if result.is_err() {
-            self.gamepads.borrow_mut().resume();
+    ) -> std::io::Result<play::RunningGame> {
+        if menu {
+            self.gamepads.borrow_mut().listen_passively();
+        } else {
+            self.gamepads.borrow_mut().suspend();
         }
-        result
+        let running = match launch() {
+            Ok(running) => running,
+            Err(e) => {
+                self.gamepads.borrow_mut().resume();
+                return Err(e);
+            }
+        };
+        let menu = menu.then(|| {
+            external_menu::Menu::start(
+                running.clone(),
+                self.gamepads.clone(),
+                self.mappings.clone(),
+                title,
+            )
+        });
+        Ok(play::RunningGame::External {
+            running,
+            _menu: menu,
+        })
     }
 
     fn external_closed(&self, id: i64, name: &str, code: Option<i32>, log: Vec<String>) {
+        let closed_by_romlin = self
+            .running
+            .borrow()
+            .as_ref()
+            .is_some_and(play::RunningGame::close_requested);
         self.gamepads.borrow_mut().resume();
         self.game_closed(None);
-        if code != Some(0) {
+        if code != Some(0) && !closed_by_romlin {
             let detail = log.last().cloned().unwrap_or_default();
             tracing::warn!("{name} exited with {code:?}:\n{}", log.join("\n"));
             self.game_status(

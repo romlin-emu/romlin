@@ -93,15 +93,24 @@ impl GameClose {
 
 pub enum RunningGame {
     Core(CoreGame),
-    External(crate::external::Running),
+    External {
+        running: crate::external::Running,
+        /// Romlin's menu over the emulator, where it can show.
+        _menu: Option<crate::external_menu::Menu>,
+    },
 }
 
 impl RunningGame {
     pub fn wait_exit(&self, timeout: Duration) -> bool {
         match self {
             Self::Core(core) => core.game.session.borrow().wait_exit(timeout),
-            Self::External(running) => running.wait_exit(timeout),
+            Self::External { running, .. } => running.wait_exit(timeout),
         }
+    }
+
+    /// Whether Romlin closed the external emulator, which then has no exit code to go by.
+    pub fn close_requested(&self) -> bool {
+        matches!(self, Self::External { running, .. } if running.close_requested())
     }
 
     pub fn apply_prefs(&self, prefs: &Preferences) {
