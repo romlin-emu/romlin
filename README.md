@@ -183,6 +183,8 @@ cargo build --release
 
 `romlin --core <core library> --rom <file>` plays a file without a RomM server, which helps when testing. `ROMLIN_PLATFORM=snes` (or any RomM platform name) gives it that console's look. With `--smoke <folder>` it plays briefly as a check, saving a frame there, and exits with an error if the game doesn't play; the Smoke test workflow runs this on each packaged build before a release.
 
+`mise run ui-shots [fixture]` renders the interface to PNG images in `dist/ui-shots/` without building the app, using the state in `crates/romp-app/ui/fixtures/` (Linux x86_64 and macOS; the task downloads a pinned [slint-viewer](https://github.com/slint-ui/slint/tree/master/tools/viewer) and checks it). `SIZE=900x700` sets the window size. Only the `.slint` files run, so behaviour still needs the real app.
+
 `mise run update-rcheevos` replaces the bundled [rcheevos](https://github.com/RetroAchievements/rcheevos) with its latest release, or a given one with `RCHEEVOS=v12.5.0 mise run update-rcheevos`.
 
 Enter your RomM server address (RomM 5.0 or newer). Approve Romlin in RomM by scanning the code or opening the link.

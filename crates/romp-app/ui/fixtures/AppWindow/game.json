@@ -1,0 +1,96 @@
+{
+  "screen": 3,
+  "user-label": "mira",
+  "user-initial": "M",
+  "user-avatar": "fixtures/images/avatar.png",
+  "has-user-avatar": true,
+  "server-label": "romm.home.lan",
+  "heading": "PlayStation 2",
+  "heading-detail": "71 games",
+  "selected-key": "p:5",
+  "show-collections": true,
+  "can-edit-collections": true,
+  "show-status": true,
+  "can-edit-status": true,
+  "sidebar": [
+    {"header": false, "key": "all", "name": "All games", "initial": "A", "count": 412, "has-icon": false, "glyph": "", "expanded": false, "can-add": false, "editable": false, "note": false},
+    {"header": false, "key": "favorites", "name": "Favorites", "initial": "F", "count": 18, "has-icon": false, "glyph": "♥", "expanded": false, "can-add": false, "editable": false, "note": false},
+    {"header": false, "key": "recent", "name": "Recently played", "initial": "R", "count": 6, "icon": "icons/recent.svg", "has-icon": true, "glyph": "", "expanded": false, "can-add": false, "editable": false, "note": false},
+    {"header": false, "key": "now-playing", "name": "Now playing", "initial": "N", "count": 2, "icon": "icons/gamepad.svg", "has-icon": true, "glyph": "", "expanded": false, "can-add": false, "editable": false, "note": false},
+    {"header": true, "key": "section:platforms", "name": "PLATFORMS", "initial": "", "count": 0, "has-icon": false, "glyph": "", "expanded": true, "can-add": false, "editable": false, "note": false},
+    {"header": false, "key": "p:1", "name": "Game Boy Advance", "initial": "G", "count": 64, "has-icon": false, "glyph": "", "expanded": false, "can-add": false, "editable": false, "note": false},
+    {"header": false, "key": "p:2", "name": "Nintendo GameCube", "initial": "N", "count": 37, "has-icon": false, "glyph": "", "expanded": false, "can-add": false, "editable": false, "note": false},
+    {"header": false, "key": "p:3", "name": "Nintendo 64", "initial": "N", "count": 52, "has-icon": false, "glyph": "", "expanded": false, "can-add": false, "editable": false, "note": false},
+    {"header": false, "key": "p:4", "name": "PlayStation", "initial": "P", "count": 88, "has-icon": false, "glyph": "", "expanded": false, "can-add": false, "editable": false, "note": false},
+    {"header": false, "key": "p:5", "name": "PlayStation 2", "initial": "P", "count": 71, "has-icon": false, "glyph": "", "expanded": false, "can-add": false, "editable": false, "note": false},
+    {"header": false, "key": "p:6", "name": "Super Nintendo Entertainment System", "initial": "S", "count": 100, "has-icon": false, "glyph": "", "expanded": false, "can-add": false, "editable": false, "note": false}
+  ],
+  "game-title": "Tin Comet",
+  "game-category": "CONSOLE",
+  "game-subtitle": "PlayStation 2 · 2003 · 1–2 players",
+  "game-stats": "Played 6 h 40 min · 9 sessions · last played yesterday",
+  "game-cover": "fixtures/images/cover-1.png",
+  "has-game-cover": true,
+  "game-cover-aspect": 0.71,
+  "game-downloaded": true,
+  "game-playable": true,
+  "game-can-download": true,
+  "game-supports-textures": true,
+  "game-can-install-textures": true,
+  "game-favorite": true,
+  "game-memberships": [
+    {"key": "c:3", "name": "Couch co-op", "member": true},
+    {"key": "c:4", "name": "Weekend picks", "member": false}
+  ],
+  "game-status-label": "Now playing",
+  "game-status-options": [
+    {"label": "Now playing", "checked": true},
+    {"label": "Backlogged", "checked": false},
+    {"label": "Incomplete", "checked": false},
+    {"label": "Finished", "checked": false},
+    {"label": "Completed 100%", "checked": false},
+    {"label": "Retired", "checked": false},
+    {"label": "Never playing", "checked": false}
+  ],
+  "game-facts": [
+    {"label": "Released", "value": "14 Mar 2003"},
+    {"label": "Genres", "value": "Platform, Adventure"},
+    {"label": "Developer", "value": "Brightwell Studio"},
+    {"label": "Publisher", "value": "Kestrel Interactive"},
+    {"label": "Franchise", "value": "Tin Comet"},
+    {"label": "Rating", "value": "84 / 100"},
+    {"label": "Size", "value": "2.9 GB"}
+  ],
+  "game-summary": "A small tin robot hitches a ride on a comet and crash-lands in a junkyard city that floats above the clouds. Glide between rooftops, magnetise loose scrap into bridges and gadgets, and chase the comet's scattered fragments across seven districts. A second player can drop in at any time as Bolt, a clockwork bird who carries the robot over gaps and scouts ahead for hidden routes.",
+  "game-shots": [
+    {"image": "fixtures/images/shot-1.png", "loaded": true},
+    {"image": "fixtures/images/shot-2.png", "loaded": true},
+    {"image": "fixtures/images/shot-3.png", "loaded": true}
+  ],
+  "game-save-slots": [
+    {"slot": -1, "label": "In-game save", "detail": "Synced with RomM · 2 hours ago", "has-thumbnail": false, "empty": false, "current": false, "in-game": true, "offer": false},
+    {"slot": 0, "label": "Where you left off", "detail": "Yesterday", "thumbnail": "fixtures/images/shot-2.png", "has-thumbnail": true, "empty": false, "current": false, "in-game": false, "offer": false},
+    {"slot": 1, "label": "Slot 1", "detail": "3 days ago", "thumbnail": "fixtures/images/shot-1.png", "has-thumbnail": true, "empty": false, "current": false, "in-game": false, "offer": false},
+    {"slot": 2, "label": "Slot 2", "detail": "On 2026-10-02", "thumbnail": "fixtures/images/shot-3.png", "has-thumbnail": true, "empty": false, "current": false, "in-game": false, "offer": false}
+  ],
+  "game-achievements-summary": "5 of 24 earned",
+  "game-achievements-hidden": 16,
+  "game-achievements": [
+    {"title": "First Spark", "detail": "Finish the junkyard tutorial · 5 points", "badge": "fixtures/images/cover-1.png", "has-badge": true, "unlocked": true, "note": ""},
+    {"title": "Scrap Collector", "detail": "Magnetise 500 pieces of scrap · 10 points", "badge": "fixtures/images/cover-5.png", "has-badge": true, "unlocked": true, "note": ""},
+    {"title": "Rooftop Runner", "detail": "Cross the Chimney District without touching the ground · 10 points", "badge": "fixtures/images/cover-3.png", "has-badge": true, "unlocked": true, "note": ""},
+    {"title": "Bird's-Eye View", "detail": "Let Bolt carry you over 20 gaps · 5 points", "badge": "fixtures/images/cover-6.png", "has-badge": true, "unlocked": true, "note": ""},
+    {"title": "Fragment Hunter", "detail": "Recover the first comet fragment · 10 points", "badge": "fixtures/images/cover-2.png", "has-badge": true, "unlocked": true, "note": ""},
+    {"title": "Bridge Builder", "detail": "Build a bridge from 30 pieces of scrap · 25 points · 18/30", "badge": "fixtures/images/cover-4.png", "has-badge": true, "unlocked": false, "note": ""},
+    {"title": "Clockwork Duet", "detail": "Finish a district with a second player · 10 points", "badge": "fixtures/images/cover-7.png", "has-badge": true, "unlocked": false, "note": ""},
+    {"title": "Cloud Diver", "detail": "Fall from the highest tower and land safely · 25 points", "badge": "fixtures/images/cover-8.png", "has-badge": true, "unlocked": false, "note": ""}
+  ],
+  "game-similar-shelf": 230,
+  "game-similar": [
+    {"id": 2, "title": "Lantern Drift", "platform": "PlayStation 2", "cover": "fixtures/images/cover-2.png", "has-cover": true, "downloaded": true, "focused": false, "favorite": false, "versions": 1, "aspect": 0.71},
+    {"id": 3, "title": "Moss Knight", "platform": "Nintendo GameCube", "cover": "fixtures/images/cover-3.png", "has-cover": true, "downloaded": false, "focused": false, "favorite": false, "versions": 1, "aspect": 0.71},
+    {"id": 4, "title": "Harbor Run", "platform": "PlayStation 2", "cover": "fixtures/images/cover-4.png", "has-cover": true, "downloaded": false, "focused": false, "favorite": false, "versions": 1, "aspect": 0.71},
+    {"id": 5, "title": "Pixel Orchard", "platform": "Game Boy Advance", "cover": "fixtures/images/cover-5.png", "has-cover": true, "downloaded": true, "focused": false, "favorite": false, "versions": 1, "aspect": 1.0},
+    {"id": 7, "title": "Glass Canyon", "platform": "Super Nintendo Entertainment System", "cover": "fixtures/images/cover-7.png", "has-cover": true, "downloaded": false, "focused": false, "favorite": false, "versions": 1, "aspect": 1.38}
+  ]
+}

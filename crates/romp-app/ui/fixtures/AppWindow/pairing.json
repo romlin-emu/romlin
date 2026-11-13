@@ -1,0 +1,9 @@
+{
+  "screen": 1,
+  "first-run": true,
+  "server-url": "https://romm.home.arpa",
+  "qr": "fixtures/images/qr.png",
+  "pair-link": "https://romm.home.arpa/pair/device?user_code=K7QM4RWT",
+  "user-code": "K7QM4RWT",
+  "seconds-left": 538
+}

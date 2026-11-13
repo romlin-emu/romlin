@@ -1,0 +1,22 @@
+{
+  "game-title": "Tin Comet — Romlin",
+  "game-name": "Tin Comet",
+  "has-menu": true,
+  "menu-open": true,
+  "paused": true,
+  "volume": 80,
+  "fullscreen": false,
+  "sharp": true,
+  "menu-focus": 3,
+  "frame": "fixtures/images/frame.png",
+  "aspect": 1.3333333,
+  "ports": [
+    { "label": "Port 1", "device": "SNES Joypad" },
+    { "label": "Port 2", "device": "Multitap" }
+  ],
+  "states": true,
+  "look-label": "CRT",
+  "has-achievements": true,
+  "achievements-label": "12 of 40 earned",
+  "hardcore": false
+}
