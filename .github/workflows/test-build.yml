@@ -1,0 +1,24 @@
+name: Test build
+
+# Packages a PR for testing on real hardware while it has the test-build label.
+# The packages are this run's artifacts; nothing is published.
+on:
+  pull_request:
+    types: [labeled, synchronize]
+
+permissions: {}
+
+jobs:
+  build:
+    # Adding another label to a PR that has test-build doesn't rebuild it.
+    if: >-
+      (github.event.action == 'labeled' && github.event.label.name == 'test-build') ||
+      (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'test-build'))
+    concurrency:
+      group: test-build-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+    with:
+      version: pr-${{ github.event.pull_request.number }}
